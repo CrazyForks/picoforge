@@ -632,16 +632,12 @@ fn parse_management_info(raw: &[u8]) -> Result<ManagementInfo, String> {
         let val = &data[i..i + len];
         match tag {
             0x01 => info.usb_supported = parse_management_u16(val),
-            0x02 => {
-                if val.len() == 4 {
-                    info.serial = Some(hex::encode_upper(val));
-                }
+            0x02 if val.len() == 4 => {
+                info.serial = Some(hex::encode_upper(val));
             }
             0x03 => info.usb_enabled = parse_management_u16(val),
-            0x05 => {
-                if val.len() >= 2 {
-                    info.firmware_version = Some(format!("{}.{}", val[0], val[1]));
-                }
+            0x05 if val.len() >= 2 => {
+                info.firmware_version = Some(format!("{}.{}", val[0], val[1]));
             }
             0x0A => {
                 if let Some(locked) = val.first() {

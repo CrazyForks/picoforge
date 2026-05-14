@@ -494,7 +494,7 @@ impl HidTransport {
                     return Ok(b.clone());
                 }
                 // Fall back to the first bytes value in the map
-                for (_, v) in &m {
+                for v in m.values() {
                     if let Value::Bytes(b) = v {
                         log::debug!("CSR found in map value ({} bytes)", b.len());
                         return Ok(b.clone());
