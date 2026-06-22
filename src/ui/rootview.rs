@@ -72,7 +72,9 @@ impl ApplicationRoot {
                     }
                 }
 
-                if status.firmware_type == crate::device::types::FirmwareType::RSKey && status.method == crate::device::types::DeviceMethod::Rescue {
+                if status.firmware_type == crate::device::types::FirmwareType::RSKey
+                    && status.method == crate::device::types::DeviceMethod::Rescue
+                {
                     self.device.led_status = io::read_led_config().ok();
                     self.device.management_apps = io::read_management_config().ok();
                 } else {

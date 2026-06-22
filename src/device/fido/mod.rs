@@ -3,8 +3,8 @@ pub mod hid;
 
 use crate::{
     device::types::{
-        AppConfig, AppConfigInput, DeviceInfo, DeviceMethod, FidoDeviceInfo, FullDeviceStatus,
-        StoredCredential, RSKEY_AAGUID, PICOFIDO_AAGUID, FirmwareType,
+        AppConfig, AppConfigInput, DeviceInfo, DeviceMethod, FidoDeviceInfo, FirmwareType,
+        FullDeviceStatus, PICOFIDO_AAGUID, RSKEY_AAGUID, StoredCredential,
     },
     error::PFError,
 };

@@ -67,7 +67,12 @@ pub fn read_led_config() -> Result<LedStatusConfig, PFError> {
     rescue::read_led_config()
 }
 
-pub fn write_led_status(status: u8, color: u8, brightness: u8, steady: bool) -> Result<String, PFError> {
+pub fn write_led_status(
+    status: u8,
+    color: u8,
+    brightness: u8,
+    steady: bool,
+) -> Result<String, PFError> {
     rescue::write_led_status(status, color, brightness, steady)
 }
 

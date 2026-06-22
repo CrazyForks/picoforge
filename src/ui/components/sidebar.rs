@@ -219,21 +219,32 @@ impl<V: 'static> AppSidebar<V> {
                                             .child("Device Status"),
                                     )
                                     .child({
-                                        let (text, color_bg, color_text) =
-                                            if let Some(status) = &state.status {
-                                                let is_rskey = status.firmware_type == crate::device::types::FirmwareType::RSKey;
-                                                let fw_label = if is_rskey { "RS-Key" } else { "Pico-FIDO" };
-                                                
-                                                if status.method == DeviceMethod::Fido {
-                                                    (format!("Online - FIDO ({})", fw_label), rgb(0xf59e0b), rgb(0xffffff))
-                                                } else {
-                                                    (format!("Online - {}", fw_label), rgb(0x16a34a), rgb(0xffffff))
-                                                }
-                                            } else if state.error.is_some() {
-                                                ("Error".to_string(), rgb(0xd97706), rgb(0xffffff))
+                                        let (text, color_bg, color_text) = if let Some(status) =
+                                            &state.status
+                                        {
+                                            let is_rskey = status.firmware_type
+                                                == crate::device::types::FirmwareType::RSKey;
+                                            let fw_label =
+                                                if is_rskey { "RS-Key" } else { "Pico-FIDO" };
+
+                                            if status.method == DeviceMethod::Fido {
+                                                (
+                                                    format!("Online - FIDO ({})", fw_label),
+                                                    rgb(0xf59e0b),
+                                                    rgb(0xffffff),
+                                                )
                                             } else {
-                                                ("Offline".to_string(), rgb(0xef4444), rgb(0xffffff))
-                                            };
+                                                (
+                                                    format!("Online - {}", fw_label),
+                                                    rgb(0x16a34a),
+                                                    rgb(0xffffff),
+                                                )
+                                            }
+                                        } else if state.error.is_some() {
+                                            ("Error".to_string(), rgb(0xd97706), rgb(0xffffff))
+                                        } else {
+                                            ("Offline".to_string(), rgb(0xef4444), rgb(0xffffff))
+                                        };
 
                                         div()
                                             .px(px(6.))

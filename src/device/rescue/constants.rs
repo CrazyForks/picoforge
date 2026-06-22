@@ -186,8 +186,14 @@ impl LedColor {
 
     pub fn all() -> &'static [Self] {
         &[
-            Self::Off, Self::Red, Self::Green, Self::Blue,
-            Self::Yellow, Self::Magenta, Self::Cyan, Self::White,
+            Self::Off,
+            Self::Red,
+            Self::Green,
+            Self::Blue,
+            Self::Yellow,
+            Self::Magenta,
+            Self::Cyan,
+            Self::White,
         ]
     }
 }

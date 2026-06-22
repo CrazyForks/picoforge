@@ -1,6 +1,9 @@
+use crate::device::rescue::constants::{
+    LedColor, LedStatus, USB_CAP_FIDO2, USB_CAP_OATH, USB_CAP_OPENPGP, USB_CAP_OTP, USB_CAP_PIV,
+    USB_CAP_U2F,
+};
 use crate::device::types::{AppConfigInput, DeviceMethod};
 use crate::device::{fido, io};
-use crate::device::rescue::constants::{LedColor, LedStatus, USB_CAP_OTP, USB_CAP_U2F, USB_CAP_OPENPGP, USB_CAP_PIV, USB_CAP_OATH, USB_CAP_FIDO2};
 use crate::ui::components::dialog::PinPromptContent;
 use crate::ui::components::{card::Card, dialog, dialog::StatusContent, page_view::PageView};
 use crate::ui::rootview::ApplicationRoot;
@@ -74,7 +77,7 @@ pub struct ConfigView {
     enable_secp256k1: bool,
     loading: bool,
     is_custom_vendor: bool,
-    
+
     // RS-Key specific state
     led_status_steady: bool,
     led_status_colors: [u8; 4],
@@ -488,8 +491,6 @@ impl ConfigView {
             led_order: current_config.led_order,
         };
 
-
-
         let method = status.method.clone();
 
         if method == DeviceMethod::Fido {
@@ -895,19 +896,25 @@ impl ConfigView {
 
             let dec_bright_listener = cx.listener(move |this, _, _, cx| {
                 let mut b = this.led_status_brightness[c_i];
-                if b > 0 { b -= 1; }
+                if b > 0 {
+                    b -= 1;
+                }
                 this.led_status_brightness[c_i] = b;
                 cx.notify();
             });
 
             let inc_bright_listener = cx.listener(move |this, _, _, cx| {
                 let mut b = this.led_status_brightness[c_i];
-                if b < 15 { b += 1; }
+                if b < 15 {
+                    b += 1;
+                }
                 this.led_status_brightness[c_i] = b;
                 cx.notify();
             });
 
-            let color_name = LedColor::from_u8(color_val).map(|c| c.label()).unwrap_or("Unknown");
+            let color_name = LedColor::from_u8(color_val)
+                .map(|c| c.label())
+                .unwrap_or("Unknown");
 
             rows = rows.child(
                 gpui_component::h_flex()
@@ -915,7 +922,9 @@ impl ConfigView {
                     .justify_between()
                     .child(div().w_24().child(status.label()))
                     .child(
-                        gpui_component::h_flex().gap_2().items_center()
+                        gpui_component::h_flex()
+                            .gap_2()
+                            .items_center()
                             .child(
                                 Button::new(gpui::SharedString::from(format!("color-btn-{}", i)))
                                     .child(color_name)
@@ -927,7 +936,7 @@ impl ConfigView {
                                             .border(theme.border),
                                     )
                                     .disabled(is_fido)
-                                    .on_click(cycle_color_listener)
+                                    .on_click(cycle_color_listener),
                             )
                             .child(div().w_4())
                             .child(
@@ -941,9 +950,15 @@ impl ConfigView {
                                             .border(theme.border),
                                     )
                                     .disabled(is_fido || brightness_val == 0)
-                                    .on_click(dec_bright_listener)
+                                    .on_click(dec_bright_listener),
                             )
-                            .child(div().w_8().flex().justify_center().child(brightness_val.to_string()))
+                            .child(
+                                div()
+                                    .w_8()
+                                    .flex()
+                                    .justify_center()
+                                    .child(brightness_val.to_string()),
+                            )
                             .child(
                                 Button::new(gpui::SharedString::from(format!("binc-btn-{}", i)))
                                     .child("+")
@@ -955,9 +970,9 @@ impl ConfigView {
                                             .border(theme.border),
                                     )
                                     .disabled(is_fido || brightness_val >= 15)
-                                    .on_click(inc_bright_listener)
-                            )
-                    )
+                                    .on_click(inc_bright_listener),
+                            ),
+                    ),
             );
         }
 
@@ -977,8 +992,8 @@ impl ConfigView {
                     .disabled(is_fido || self.loading)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.apply_rskey_led_settings(window, cx);
-                    }))
-            )
+                    })),
+            ),
         );
 
         Card::new()
@@ -998,19 +1013,25 @@ impl ConfigView {
         let entity = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
-            let result = cx.background_executor().spawn(async move {
-                for i in 0..4 {
-                    io::write_led_status(i as u8, colors[i], brightnesses[i], steady)?;
-                }
-                Ok::<_, crate::error::PFError>(())
-            }).await;
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    for i in 0..4 {
+                        io::write_led_status(i as u8, colors[i], brightnesses[i], steady)?;
+                    }
+                    Ok::<_, crate::error::PFError>(())
+                })
+                .await;
 
             let _ = entity.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
                     Ok(_) => {
                         let _ = handle.update(cx, |d, cx| {
-                            d.set_success("LED configuration applied successfully.".to_string(), cx);
+                            d.set_success(
+                                "LED configuration applied successfully.".to_string(),
+                                cx,
+                            );
                         });
                     }
                     Err(e) => {
@@ -1028,7 +1049,11 @@ impl ConfigView {
     ///
     /// Provides toggles to enable or disable USB endpoints such as U2F, OATH, PIV, and OpenPGP.
     /// Safely computes the bitmasks and writes to the Management applet. Gated by hardware support.
-    fn render_rskey_apps_card(&mut self, cx: &mut Context<Self>, is_fido: bool) -> impl IntoElement {
+    fn render_rskey_apps_card(
+        &mut self,
+        cx: &mut Context<Self>,
+        is_fido: bool,
+    ) -> impl IntoElement {
         let theme = cx.theme();
         let mut rows = v_flex().gap_4();
 
@@ -1054,25 +1079,27 @@ impl ConfigView {
                 cx.notify();
             });
 
-            rows = rows.child(
-                gpui_component::h_flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        v_flex().gap_0p5().child(name).child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child(if is_supported { "Supported" } else { "Not Supported by Firmware" }),
+            rows =
+                rows.child(
+                    gpui_component::h_flex()
+                        .items_center()
+                        .justify_between()
+                        .child(v_flex().gap_0p5().child(name).child(
+                            div().text_sm().text_color(theme.muted_foreground).child(
+                                if is_supported {
+                                    "Supported"
+                                } else {
+                                    "Not Supported by Firmware"
+                                },
+                            ),
+                        ))
+                        .child(
+                            Switch::new(gpui::SharedString::from(format!("app-toggle-{}", cap)))
+                                .checked(is_enabled)
+                                .disabled(is_fido || !is_supported)
+                                .on_click(toggle_listener),
                         ),
-                    )
-                    .child(
-                        Switch::new(gpui::SharedString::from(format!("app-toggle-{}", cap)))
-                            .checked(is_enabled)
-                            .disabled(is_fido || !is_supported)
-                            .on_click(toggle_listener),
-                    ),
-            );
+                );
         }
 
         rows = rows.child(div().h_px().bg(theme.border));
@@ -1090,8 +1117,8 @@ impl ConfigView {
                     .disabled(is_fido || self.loading)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.apply_rskey_apps_settings(window, cx);
-                    }))
-            )
+                    })),
+            ),
         );
 
         Card::new()
@@ -1103,22 +1130,27 @@ impl ConfigView {
 
     fn apply_rskey_apps_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mask = self.usb_apps_enabled;
-        
+
         self.loading = true;
         let handle = dialog::open_status_dialog("Applying USB Applications...", window, cx);
         let entity = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
-            let result = cx.background_executor().spawn(async move {
-                io::write_management_config(mask)
-            }).await;
+            let result = cx
+                .background_executor()
+                .spawn(async move { io::write_management_config(mask) })
+                .await;
 
             let _ = entity.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
                     Ok(_) => {
                         let _ = handle.update(cx, |d, cx| {
-                            d.set_success("USB applications updated successfully. Please re-plug the device.".to_string(), cx);
+                            d.set_success(
+                                "USB applications updated successfully. Please re-plug the device."
+                                    .to_string(),
+                                cx,
+                            );
                         });
                     }
                     Err(e) => {
@@ -1185,19 +1217,17 @@ impl Render for ConfigView {
         let identity_card = self
             .render_identity_card(cx.theme(), is_fido, hardware_config_disabled)
             .into_any_element();
-        let touch_card = self.render_touch_card(cx.theme(), is_fido).into_any_element();
+        let touch_card = self
+            .render_touch_card(cx.theme(), is_fido)
+            .into_any_element();
 
         let is_wide = window.bounds().size.width > px(1100.0);
         let columns = if is_wide { 2 } else { 1 };
 
-        let is_rskey = status.as_ref().map(|s| &s.firmware_type) == Some(&crate::device::types::FirmwareType::RSKey);
+        let is_rskey = status.as_ref().map(|s| &s.firmware_type)
+            == Some(&crate::device::types::FirmwareType::RSKey);
 
-        let mut grid_children = vec![
-            identity_card,
-            led_card,
-            touch_card,
-            options_card,
-        ];
+        let mut grid_children = vec![identity_card, led_card, touch_card, options_card];
 
         if is_rskey {
             let rskey_led = self.render_rskey_led_card(cx, is_fido).into_any_element();
@@ -1207,7 +1237,7 @@ impl Render for ConfigView {
         }
 
         let theme = cx.theme();
-        
+
         PageView::build(
             "Configuration",
             "Customize device settings and behavior.",

@@ -167,7 +167,12 @@ impl HidTransport {
         self.send_cbor_with_timeout(cmd, payload, HID_TOTAL_TIMEOUT_MS)
     }
 
-    pub fn send_cbor_with_timeout(&self, cmd: u8, payload: &[u8], timeout_ms: i32) -> Result<Vec<u8>, PFError> {
+    pub fn send_cbor_with_timeout(
+        &self,
+        cmd: u8,
+        payload: &[u8],
+        timeout_ms: i32,
+    ) -> Result<Vec<u8>, PFError> {
         self.write_cbor_request(cmd, payload)?;
         self.read_cbor_response(cmd, timeout_ms)
     }

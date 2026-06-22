@@ -17,7 +17,7 @@ type SetPinCallback = std::rc::Rc<dyn Fn(String, WeakEntity<SetPinContent>, &mut
 enum DialogPhase {
     Input,
     Loading,
-    /// Indicates the dialog is blocked on an asynchronous background task, 
+    /// Indicates the dialog is blocked on an asynchronous background task,
     /// presenting a specific dynamic status message to guide the user (e.g. "Waiting for touch...").
     LoadingWithMessage(String),
     Success(String),

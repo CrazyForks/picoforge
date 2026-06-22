@@ -13,7 +13,7 @@ use directories::UserDirs;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::Disableable;
-use gpui_component::button::{Button, ButtonVariant, ButtonVariants, ButtonCustomVariant};
+use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants};
 use gpui_component::{
     ActiveTheme, Icon, Placement, Sizable, StyledExt, Theme, WindowExt,
     badge::Badge,
@@ -1117,41 +1117,50 @@ impl PasskeysView {
             return;
         }
         self.loading = true;
-        
+
         let status_handle = dialog::open_status_dialog("Resetting Device...", window, cx);
         let entity = cx.entity().downgrade();
 
         let _ = status_handle.update(cx, |d, cx| {
-            d.set_loading("Unplug your security key, then plug it back in within 10 seconds.", cx);
+            d.set_loading(
+                "Unplug your security key, then plug it back in within 10 seconds.",
+                cx,
+            );
         });
 
         self._task = Some(cx.spawn(async move |_, cx| {
             // Wait for unplug/replug
-            let reconnected = cx.background_executor().spawn(async move {
-                let start = std::time::Instant::now();
-                // 1. Wait for unplug
-                while start.elapsed().as_secs() < 15 {
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                    if crate::device::fido::hid::HidTransport::open().is_err() {
-                        break;
+            let reconnected = cx
+                .background_executor()
+                .spawn(async move {
+                    let start = std::time::Instant::now();
+                    // 1. Wait for unplug
+                    while start.elapsed().as_secs() < 15 {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        if crate::device::fido::hid::HidTransport::open().is_err() {
+                            break;
+                        }
                     }
-                }
-                
-                // 2. Wait for replug
-                while start.elapsed().as_secs() < 15 {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    if crate::device::fido::hid::HidTransport::open().is_ok() {
-                        return true;
+
+                    // 2. Wait for replug
+                    while start.elapsed().as_secs() < 15 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        if crate::device::fido::hid::HidTransport::open().is_ok() {
+                            return true;
+                        }
                     }
-                }
-                false
-            }).await;
+                    false
+                })
+                .await;
 
             if !reconnected {
                 let _ = entity.update(cx, |this, cx| {
                     this.loading = false;
                     let _ = status_handle.update(cx, |d, cx| {
-                        d.set_error("Timeout waiting for device reconnection. Reset canceled.".to_string(), cx);
+                        d.set_error(
+                            "Timeout waiting for device reconnection. Reset canceled.".to_string(),
+                            cx,
+                        );
                     });
                     cx.notify();
                 });
@@ -1164,9 +1173,10 @@ impl PasskeysView {
             });
 
             // Execute reset
-            let result = cx.background_executor().spawn(async move {
-                io::reset_device()
-            }).await;
+            let result = cx
+                .background_executor()
+                .spawn(async move { io::reset_device() })
+                .await;
 
             let _ = entity.update(cx, |this, cx| {
                 this.loading = false;
@@ -1177,7 +1187,9 @@ impl PasskeysView {
                         let _ = status_handle.update(cx, |d, cx| {
                             d.set_success(msg, cx);
                         });
-                        cx.emit(PasskeysEvent::Notification("Device reset successfully".into()));
+                        cx.emit(PasskeysEvent::Notification(
+                            "Device reset successfully".into(),
+                        ));
                     }
                     Err(e) => {
                         log::error!("Error resetting device: {}", e);

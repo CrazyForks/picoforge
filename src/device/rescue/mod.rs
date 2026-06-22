@@ -14,7 +14,7 @@ use std::io::Cursor;
 ///
 /// **WARNING:** This is a temporary heuristic that relies on the major version byte (`major >= 8` implies RS-Key).
 /// If Pico-Fido releases v8.x, this logic will silently fail and misidentify devices.
-/// 
+///
 /// TODO: Work with upstream RS-Key maintainers to expose a unique identity block or hardware string
 /// in the SELECT response to reliably differentiate the firmwares in the long term.
 fn detect_firmware_type(select_resp: &[u8]) -> FirmwareType {
@@ -486,9 +486,10 @@ fn connect_and_select_aid(aid: &[u8]) -> Result<pcsc::Card, PFError> {
     let rx = card.transmit(&apdu, &mut rx_buf)?;
 
     if !rx.ends_with(&[0x90, 0x00]) {
-        return Err(PFError::Device(
-            format!("Applet not found (AID {:02X?})", aid),
-        ));
+        return Err(PFError::Device(format!(
+            "Applet not found (AID {:02X?})",
+            aid
+        )));
     }
 
     Ok(card)
@@ -545,7 +546,10 @@ pub fn write_led_status(
 ) -> Result<String, PFError> {
     log::info!(
         "Setting LED: status={}, color={}, brightness={}, steady={}",
-        status, color, brightness, steady
+        status,
+        color,
+        brightness,
+        steady
     );
     let card = connect_and_select_aid(VENDOR_LED_AID)?;
 
@@ -572,7 +576,7 @@ pub fn write_led_status(
 
 /// Retrieves the device management configuration mapping from the Management applet.
 ///
-/// Reads the active state of various USB interfaces (U2F, OATH, PIV, OpenPGP, etc.) to 
+/// Reads the active state of various USB interfaces (U2F, OATH, PIV, OpenPGP, etc.) to
 /// determine which are supported by the hardware and which are currently enabled by the user.
 pub fn read_management_config() -> Result<ManagementAppConfig, PFError> {
     log::info!("Reading management config from Management applet");
@@ -646,7 +650,7 @@ pub fn read_management_config() -> Result<ManagementAppConfig, PFError> {
 /// Persists updated management endpoint configurations to the device.
 ///
 /// Overwrites the previously enabled interfaces with a new configuration bitmask.
-/// For the changes to fully apply across all composite USB endpoints, a subsequent 
+/// For the changes to fully apply across all composite USB endpoints, a subsequent
 /// device reboot or re-plug is required.
 pub fn write_management_config(enabled_mask: u16) -> Result<String, PFError> {
     log::info!("Writing management config: enabled=0x{:04X}", enabled_mask);
