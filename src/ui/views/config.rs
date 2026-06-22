@@ -84,6 +84,7 @@ pub struct ConfigView {
     led_status_brightness: [u8; 4],
     usb_apps_supported: u16,
     usb_apps_enabled: u16,
+    enabled_usb_itf: Option<u8>,
 
     _task: Option<Task<()>>,
 }
@@ -245,6 +246,7 @@ impl ConfigView {
             led_status_brightness,
             usb_apps_supported,
             usb_apps_enabled,
+            enabled_usb_itf: config.and_then(|c| c.enabled_usb_itf),
             _task: None,
         }
     }
@@ -471,6 +473,12 @@ impl ConfigView {
             has_changes = true;
         }
 
+        let mut final_enabled_usb_itf = current_config.enabled_usb_itf;
+        if self.enabled_usb_itf != current_config.enabled_usb_itf {
+            has_changes = true;
+            final_enabled_usb_itf = self.enabled_usb_itf;
+        }
+
         if !has_changes {
             log::info!("No changes detected");
             return;
@@ -489,6 +497,7 @@ impl ConfigView {
             led_steady: Some(self.led_steady),
             enable_secp256k1: Some(self.enable_secp256k1),
             led_order: current_config.led_order,
+            enabled_usb_itf: final_enabled_usb_itf,
         };
 
         let method = status.method.clone();
@@ -596,6 +605,8 @@ impl ConfigView {
             self.usb_apps_supported = apps.usb_supported;
             self.usb_apps_enabled = apps.usb_enabled;
         }
+
+        self.enabled_usb_itf = config.and_then(|c| c.enabled_usb_itf);
 
         cx.notify();
     }
@@ -1163,6 +1174,75 @@ impl ConfigView {
             });
         }));
     }
+
+    fn render_rskey_usb_itf_card(
+        &mut self,
+        cx: &mut Context<Self>,
+        is_fido: bool,
+    ) -> impl IntoElement {
+        let theme = cx.theme();
+        let mut rows = v_flex().gap_4();
+
+        // 0x01: CCID, 0x02: WCID, 0x04: HID, 0x08: KB, 0x10: LWIP
+        let interfaces = [
+            ("CCID (Smart Card)", 0x01u8),
+            ("WCID (WebUSB)", 0x02u8),
+            ("HID (FIDO)", 0x04u8),
+            ("KB (Keyboard)", 0x08u8),
+            ("LWIP", 0x10u8),
+        ];
+
+        let current_mask = self.enabled_usb_itf.unwrap_or(0x1F); // Default to all on if missing
+
+        for (name, bit) in interfaces {
+            let is_enabled = (current_mask & bit) != 0;
+            let is_ccid = bit == 0x01;
+
+            let toggle_listener = cx.listener(move |this, checked, _, cx| {
+                let mut mask = this.enabled_usb_itf.unwrap_or(0x1F);
+                if *checked {
+                    mask |= bit;
+                } else {
+                    mask &= !bit;
+                }
+                
+                if bit == 0x01 {
+                    // Force CCID on to prevent bricking
+                    mask |= 0x01;
+                }
+                
+                this.enabled_usb_itf = Some(mask);
+                cx.notify();
+            });
+
+            rows = rows.child(
+                gpui_component::h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(v_flex().gap_0p5().child(name).child(
+                        div().text_sm().text_color(theme.muted_foreground).child(
+                            if is_ccid {
+                                "Required for Rescue Applet"
+                            } else {
+                                "USB Endpoint"
+                            },
+                        ),
+                    ))
+                    .child(
+                        Switch::new(gpui::SharedString::from(format!("usb-itf-toggle-{}", bit)))
+                            .checked(is_enabled || is_ccid) // CCID always looks checked
+                            .disabled(is_fido || is_ccid) // Disable toggling CCID entirely!
+                            .on_click(toggle_listener),
+                    ),
+            );
+        }
+
+        Card::new()
+            .title("Hardware Endpoints")
+            .description("Toggle low-level USB interfaces")
+            .icon(Icon::default().path("icons/cpu.svg"))
+            .child(rows)
+    }
 }
 
 impl Render for ConfigView {
@@ -1232,8 +1312,10 @@ impl Render for ConfigView {
         if is_rskey {
             let rskey_led = self.render_rskey_led_card(cx, is_fido).into_any_element();
             let rskey_apps = self.render_rskey_apps_card(cx, is_fido).into_any_element();
+            let rskey_usb_itf = self.render_rskey_usb_itf_card(cx, is_fido).into_any_element();
             grid_children.push(rskey_led);
             grid_children.push(rskey_apps);
+            grid_children.push(rskey_usb_itf);
         }
 
         let theme = cx.theme();

@@ -33,6 +33,8 @@ pub struct AppConfig {
     pub enable_secp256k1: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub led_order: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled_usb_itf: Option<u8>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -50,6 +52,7 @@ pub struct AppConfigInput {
     pub led_steady: Option<bool>,
     pub enable_secp256k1: Option<bool>,
     pub led_order: Option<u8>,
+    pub enabled_usb_itf: Option<u8>,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]

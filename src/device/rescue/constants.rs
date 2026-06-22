@@ -96,6 +96,7 @@ pub enum PhyTag {
     Curves = 0x0A,
     LedDriver = 0x0C,
     LedOrder = 0x0D,
+    EnabledUsbItf = 0x0B,
 }
 
 impl PhyTag {
@@ -109,6 +110,7 @@ impl PhyTag {
             0x08 => Some(Self::PresenceTimeout),
             0x09 => Some(Self::UsbProduct),
             0x0A => Some(Self::Curves),
+            0x0B => Some(Self::EnabledUsbItf),
             0x0C => Some(Self::LedDriver),
             0x0D => Some(Self::LedOrder),
             _ => None,
@@ -129,6 +131,17 @@ bitflags::bitflags! {
     /// Enabled curves for TAG_CURVES (Tag 0x0A)
     pub struct RescueCurves: u32 {
         const SECP256K1 = 0x08;
+    }
+}
+
+bitflags::bitflags! {
+    /// Enabled USB interfaces for TAG 0x0B (EnabledUsbItf)
+    pub struct UsbInterfaces: u8 {
+        const CCID = 0x01;
+        const WCID = 0x02;
+        const HID = 0x04;
+        const KB = 0x08;
+        const LWIP = 0x10;
     }
 }
 

@@ -10,24 +10,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use pcsc::{Context, Protocols, Scope, ShareMode};
 use std::io::Cursor;
 
-/// Differentiates between Pico-Fido and RS-Key firmwares based on the Rescue Applet SELECT response.
-///
-/// **WARNING:** This is a temporary heuristic that relies on the major version byte (`major >= 8` implies RS-Key).
-/// If Pico-Fido releases v8.x, this logic will silently fail and misidentify devices.
-///
-/// TODO: Work with upstream RS-Key maintainers to expose a unique identity block or hardware string
-/// in the SELECT response to reliably differentiate the firmwares in the long term.
-fn detect_firmware_type(select_resp: &[u8]) -> FirmwareType {
-    if select_resp.len() >= 4 {
-        let major = select_resp[2];
-        if major >= 8 {
-            return FirmwareType::RSKey;
-        } else {
-            return FirmwareType::PicoFido;
-        }
-    }
-    FirmwareType::Unknown
-}
+
 
 /// Connects to the first available reader and selects the Rescue Applet
 fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>, FirmwareType), PFError> {
@@ -44,6 +27,13 @@ fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>, FirmwareType), PFError> 
         log::info!("No Smart Card Reader found");
         PFError::NoDevice
     })?;
+
+    let reader_name = reader.to_string_lossy();
+    let mut fw_type = if reader_name.contains("RS-Key") || reader_name.contains("RSK") {
+        FirmwareType::RSKey
+    } else {
+        FirmwareType::Unknown
+    };
 
     let card = ctx.connect(reader, ShareMode::Shared, Protocols::ANY)?;
 
@@ -70,9 +60,17 @@ fn connect_and_select() -> Result<(pcsc::Card, Vec<u8>, FirmwareType), PFError> 
         ));
     }
 
-    log::info!("Successfully connected to Rescue Applet");
     let data = rx.to_vec();
-    let fw_type = detect_firmware_type(&data);
+
+    if fw_type == FirmwareType::Unknown {
+        if data.len() >= 4 && data[2] >= 8 {
+            fw_type = FirmwareType::RSKey;
+        } else {
+            fw_type = FirmwareType::PicoFido;
+        }
+    }
+
+    log::info!("Successfully connected to Rescue Applet");
     log::info!("Detected firmware type: {:?}", fw_type);
     Ok((card, data, fw_type))
 }
@@ -240,6 +238,11 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
                         config.led_order = Some(val[0]);
                     }
                 }
+                PhyTag::EnabledUsbItf => {
+                    if !val.is_empty() {
+                        config.enabled_usb_itf = Some(val[0]);
+                    }
+                }
             }
         }
         i += len;
@@ -368,6 +371,14 @@ pub fn write_config(config: AppConfigInput) -> Result<String, PFError> {
         tlv.push(PhyTag::LedOrder as u8);
         tlv.push(0x01);
         tlv.push(val);
+    }
+
+    // Enabled USB Interfaces (Tag 0x0B)
+    if let Some(val) = config.enabled_usb_itf {
+        tlv.push(PhyTag::EnabledUsbItf as u8);
+        tlv.push(0x01);
+        // SAFETY: Never write a mask without CCID, otherwise Rescue applet is unreachable.
+        tlv.push(val | UsbInterfaces::CCID.bits());
     }
 
     // 2. Connect and Send
