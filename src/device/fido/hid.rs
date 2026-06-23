@@ -1,5 +1,88 @@
-use aes::cipher::generic_array::GenericArray;
-use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::NoPadding};
+//! USB HID transport for CTAP2/FIDO2 communication.
+//!
+//! # What is HID?
+//!
+//! USB HID (Human Interface Device) is a standard USB device class for input
+//! devices like keyboards, mice, and gamepads. HID devices communicate through
+//! *reports* — fixed-size packets sent/received on USB endpoints. The OS
+//! auto-detects HID devices without requiring custom drivers, making it ideal
+//! for FIDO2 security keys that need to work across platforms.
+//!
+//! # What is CTAPHID?
+//!
+//! CTAPHID is the [CTAP2] transport binding for USB HID. It layers the CTAP2
+//! protocol on top of HID reports, allowing FIDO2 authenticators to
+//! communicate with hosts through the standard HID driver stack. The
+//! specification is defined in [CTAP2 §11.2](https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html#usb-human-interface-device-hid).
+//!
+//! # Framing protocol
+//!
+//! CTAPHID uses 64-byte HID reports. Messages that exceed 64 bytes are split
+//! across multiple packets:
+//!
+//! ```text
+//! Init Packet (64 bytes):
+//!   CID(4) | CMD(1) | BCNT_HI(1) | BCNT_LO(1) | payload[..57]
+//!
+//! Continuation Packets:
+//!   CID(4) | SEQ(1) | payload[..59]
+//! ```
+//!
+//! - **CID** (Channel ID): 4-byte identifier negotiated via `CTAPHID_INIT`.
+//!   Multiplexes multiple logical channels on one HID device.
+//! - **CMD**: Command byte (e.g., `0x90` for CBOR, `0x86` for INIT).
+//! - **BCNT**: 16-bit big-endian payload length.
+//! - **SEQ**: Sequence number for continuation packets (starts at 0).
+//!
+//! # Channel initialization
+//!
+//! Before any CTAP2 command can be sent, the host must negotiate a Channel ID:
+//!
+//! 1. Host sends `CTAPHID_INIT` to the broadcast CID (`0xFFFFFFFF`) with a
+//!    random 8-byte nonce.
+//! 2. Device responds with the same nonce and a newly allocated CID.
+//! 3. All subsequent communication uses this CID.
+//!
+//! This allows multiple CTAP2 sessions to coexist on one device (e.g., two
+//! browsers open simultaneously).
+//!
+//! # Cryptographic operations
+//!
+//! PIN operations require ECDH key agreement and AES-256-CBC encryption:
+//!
+//! ```text
+//! 1. Host → Device: GetKeyAgreement (returns device's P-256 public key)
+//! 2. Host generates ephemeral P-256 key pair
+//! 3. Host computes ECDH shared secret → SHA-256(shared_secret)
+//! 4. PIN hash encrypted with AES-256-CBC (key = shared_secret, IV = 0)
+//! 5. Token decrypted with same key
+//! ```
+//!
+//! The shared secret is derived as `SHA-256(ECDH_x_coordinate)`.
+//!
+//! # Firmware compatibility
+//!
+//! Both [pico-fido] and [RS-Key] implement CTAPHID. This module handles:
+//! - Standard CTAP2 commands (GetInfo, MakeCredential, GetAssertion, etc.)
+//! - Pico-fido vendor commands (`0xC1`, `0xC2`) for hardware config
+//! - RS-Key vendor command (`0x41`) for seed backup and attestation
+//!
+//! # File structure
+//!
+//! - [`HidTransport`] — main transport struct; opens HID device, negotiates
+//!   CID, sends/receives CBOR payloads
+//! - [`EnumerateRpResponse`], [`EnumerateCredentialResponse`] — response
+//!   types for credential management enumeration
+//! - PIN methods (`get_pin_token`, `set_pin`, `change_pin`) implement the
+//!   full ECDH + AES-CBC flow per CTAP2 §11.5.4
+//! - Vendor methods (`send_vendor_config`, `get_enterprise_attestation_csr`)
+//!   handle pico-fido/RS-Key specific extensions
+//!
+//! [CTAP2]: https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html
+//! [pico-fido]: https://github.com/polhenarejos/pico-fido
+//! [RS-Key]: https://github.com/TheMaxMur/RS-Key
+
+use cbc::cipher::{Block, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit, block_padding::NoPadding};
 use rand::RngExt;
 use ring::{agreement, digest, hmac};
 use serde_cbor_2::{Value, from_slice, to_vec};
@@ -9,22 +92,70 @@ use std::time::Duration;
 use crate::device::fido::constants::*;
 use crate::error::PFError;
 
-// HID Transport Constants
+/// Size of a single USB HID report in bytes (CTAP2 §11.2 mandates 64-byte reports).
 const HID_REPORT_SIZE: usize = 64;
+
+/// FIDO Alliance HID Usage Page identifier.
+///
+/// Devices advertising this usage page in their HID descriptor are identified
+/// as FIDO authenticators by the operating system's HID enumeration.
 const HID_USAGE_PAGE_FIDO: u16 = 0xF1D0;
+
+/// Broadcast Channel ID used for the initial CTAPHID_INIT handshake.
+///
+/// The host sends an INIT command to this CID to request a unique Channel ID
+/// from the authenticator. All subsequent communication uses the negotiated CID.
 const CTAPHID_CID_BROADCAST: u32 = 0xFFFFFFFF;
+
+/// CTAPHID INIT command byte (0x86).
+///
+/// Initiates channel negotiation. The host sends a random 8-byte nonce; the
+/// device responds with the same nonce and a newly allocated Channel ID.
 const CTAPHID_INIT: u8 = 0x86;
+
+/// CTAPHID CBOR command byte (0x90).
+///
+/// Wraps a CTAP2 CBOR-encoded command or response payload. The payload is
+/// fragmented across one init packet and zero or more continuation packets.
 pub const CTAPHID_CBOR: u8 = 0x90;
+
+/// CTAPHID ERROR response byte (0xBF).
+///
+/// Indicates the authenticator encountered an error processing the command.
+/// The next byte contains the CTAP2 error code.
 const CTAPHID_ERROR: u8 = 0xBF;
+
+/// CTAPHID KEEPALIVE status byte (0xBB).
+///
+/// Sent by the authenticator while processing a long-running operation (e.g.,
+/// MakeCredential with user interaction). The host must continue reading
+/// until it receives the final CBOR or ERROR response.
 const CTAPHID_KEEPALIVE: u8 = 0xBB;
 
-// Timeouts
+/// Default timeout in milliseconds for draining stale HID packets.
 const HID_READ_TIMEOUT_MS: i32 = 10;
+
+/// Timeout in milliseconds for reading the CTAPHID_INIT response during channel negotiation.
 const HID_INIT_READ_TIMEOUT_MS: i32 = 100;
+
+/// Timeout in milliseconds for reading a single HID response packet (excluding keepalives).
 const HID_RESP_READ_TIMEOUT_MS: i32 = 2000;
+
+/// Timeout in milliseconds for reading CTAPHID continuation packets.
 const HID_CONT_READ_TIMEOUT_MS: i32 = 500;
+
+/// Maximum total time in milliseconds allowed for a complete CBOR command/response exchange.
 const HID_TOTAL_TIMEOUT_MS: i32 = 5000;
 
+/// USB HID transport for CTAP2/FIDO2 communication.
+///
+/// Wraps a `hidapi::HidDevice` and manages the CTAPHID framing layer:
+/// channel negotiation (INIT), multi-packet CBOR send/receive, keepalive
+/// handling, and all higher-level CTAP2 operations (PIN, credential management,
+/// vendor commands).
+///
+/// Created via [`HidTransport::open`], which scans for a device with the FIDO
+/// HID Usage Page (0xF1D0) and performs the INIT handshake to obtain a Channel ID.
 pub struct HidTransport {
     device: hidapi::HidDevice,
     cid: u32,
@@ -33,6 +164,10 @@ pub struct HidTransport {
     pub product_name: String,
 }
 
+/// Response from enumerating a Relying Party via credential management.
+///
+/// Returned by [`HidTransport::credential_management_enumerate_rps`]. Each entry
+/// represents one RP stored on the authenticator.
 #[derive(Debug, Clone)]
 pub struct EnumerateRpResponse {
     pub rp: Value,
@@ -41,6 +176,10 @@ pub struct EnumerateRpResponse {
     pub total_rps: Option<usize>,
 }
 
+/// Response from enumerating a credential via credential management.
+///
+/// Returned by [`HidTransport::credential_management_enumerate_credentials`].
+/// Each entry represents one credential (public key) registered under an RP.
 #[derive(Debug, Clone)]
 pub struct EnumerateCredentialResponse {
     pub user: Value,
@@ -52,6 +191,11 @@ pub struct EnumerateCredentialResponse {
 }
 
 impl HidTransport {
+    /// Open the first available FIDO HID device and negotiate a Channel ID.
+    ///
+    /// Scans for a device with HID Usage Page `0xF1D0`, opens it, and performs
+    /// the CTAPHID_INIT handshake. Returns an error if no device is found or
+    /// the INIT handshake times out.
     pub fn open() -> Result<Self, PFError> {
         log::info!("Attempting to open HID transport for FIDO device...");
         let api = hidapi::HidApi::new().map_err(|e| {
@@ -102,6 +246,11 @@ impl HidTransport {
         })
     }
 
+    /// Negotiate a CTAPHID Channel ID via CTAPHID_INIT.
+    ///
+    /// Sends an INIT command to the broadcast CID (`0xFFFFFFFF`) with a random
+    /// 8-byte nonce, then reads the response to extract the allocated CID.
+    /// Drains any stale packets before the handshake to avoid confusion.
     fn init_channel(device: &hidapi::HidDevice) -> Result<u32, PFError> {
         log::debug!("Initializing CTAPHID channel...");
 
@@ -163,16 +312,54 @@ impl HidTransport {
         ))
     }
 
+    /// Send a CTAP2 CBOR command and wait for the response using the default timeout.
+    ///
+    /// Convenience wrapper around [`send_cbor_with_timeout`](HidTransport::send_cbor_with_timeout).
     pub fn send_cbor(&self, cmd: u8, payload: &[u8]) -> Result<Vec<u8>, PFError> {
-        self.write_cbor_request(cmd, payload)?;
-        self.read_cbor_response(cmd)
+        self.send_cbor_with_timeout(cmd, payload, HID_TOTAL_TIMEOUT_MS)
     }
 
+    /// Send a CTAP2 CBOR command and wait for the response with a custom timeout.
+    ///
+    /// Fragments `payload` into CTAPHID init + continuation packets, then reads
+    /// and reassembles the response. The `timeout_ms` parameter overrides the
+    /// default for the read phase (useful for operations that require user interaction).
+    pub fn send_cbor_with_timeout(
+        &self,
+        cmd: u8,
+        payload: &[u8],
+        timeout_ms: i32,
+    ) -> Result<Vec<u8>, PFError> {
+        self.write_cbor_request(cmd, payload)?;
+        self.read_cbor_response(cmd, timeout_ms)
+    }
+
+    /// Send a CTAP2 CBOR command and return the raw HID response without status-byte parsing.
+    ///
+    /// Unlike [`send_cbor`](HidTransport::send_cbor), this does not check the CTAP status byte
+    /// or strip it from the response. Useful for vendor commands that return non-standard payloads.
     pub fn send_raw(&self, cmd: u8, payload: &[u8]) -> Result<Vec<u8>, PFError> {
         self.write_cbor_request(cmd, payload)?;
-        self.read_hid_response(cmd)
+        self.read_hid_response(cmd, HID_TOTAL_TIMEOUT_MS)
     }
 
+    /// Send the CTAP authenticatorReset command (0x07).
+    ///
+    /// Resets the authenticator to its factory state: all credentials, PINs,
+    /// and configuration are erased. Uses a 30-second timeout to allow for
+    /// any required user interaction (e.g., touch confirmation).
+    pub fn reset(&self) -> Result<(), PFError> {
+        log::info!("Sending CTAP authenticatorReset (0x07)...");
+        self.write_cbor_request(CTAPHID_CBOR, &[0x07])?;
+        self.read_cbor_response(CTAPHID_CBOR, 30_000)?;
+        Ok(())
+    }
+
+    /// Fragment and write a CTAPHID request to the device.
+    ///
+    /// Encodes the command byte and payload into a CTAPHID init packet followed
+    /// by zero or more continuation packets, then writes each 65-byte HID report
+    /// (1 byte Report ID + 64 bytes payload) to the device.
     fn write_cbor_request(&self, cmd: u8, payload: &[u8]) -> Result<(), PFError> {
         log::debug!(
             "Sending CBOR Command: 0x{:02X}, Payload Size: {} bytes",
@@ -239,8 +426,13 @@ impl HidTransport {
         Ok(())
     }
 
-    fn read_cbor_response(&self, cmd: u8) -> Result<Vec<u8>, PFError> {
-        let response_data = self.read_hid_response(cmd)?;
+    /// Read a CTAPHID response and verify the CTAP status byte.
+    ///
+    /// Delegates to [`read_hid_response`](HidTransport::read_hid_response) for packet
+    /// reassembly, then checks the first byte for a non-zero CTAP status code and
+    /// strips it before returning the payload.
+    fn read_cbor_response(&self, cmd: u8, timeout_ms: i32) -> Result<Vec<u8>, PFError> {
+        let response_data = self.read_hid_response(cmd, timeout_ms)?;
 
         // Check CTAP Status Byte (First byte of payload)
         if response_data.is_empty() {
@@ -265,7 +457,14 @@ impl HidTransport {
         Ok(response_data[1..].to_vec())
     }
 
-    fn read_hid_response(&self, cmd: u8) -> Result<Vec<u8>, PFError> {
+    /// Read and reassemble a CTAPHID response from the device.
+    ///
+    /// Handles the full CTAPHID receive flow:
+    /// 1. Reads the init packet while skipping KEEPALIVE and mismatched-CID packets.
+    /// 2. Validates the command byte matches the expected response.
+    /// 3. Reads continuation packets in sequence order until the full payload is received.
+    /// 4. Enforces the `timeout_ms` deadline across the entire read.
+    fn read_hid_response(&self, cmd: u8, timeout_ms: i32) -> Result<Vec<u8>, PFError> {
         log::debug!("Waiting for response...");
 
         let mut buf = [0u8; HID_REPORT_SIZE];
@@ -275,7 +474,7 @@ impl HidTransport {
         let mut last_seq = 0;
 
         let start_time = std::time::Instant::now();
-        let timeout_duration = std::time::Duration::from_millis(HID_TOTAL_TIMEOUT_MS as u64);
+        let timeout_duration = std::time::Duration::from_millis(timeout_ms as u64);
 
         // 1. Read First Packet (Loop to handle Keepalives)
         loop {
@@ -381,6 +580,12 @@ impl HidTransport {
         Ok(response_data)
     }
 
+    /// Send a pico-fido vendor-specific authenticatorConfig command.
+    ///
+    /// Wraps the vendor command ID and parameter into the VendorPrototype
+    /// sub-command structure, signs it with the PIN token, and sends it as
+    /// a CTAP Config command. The parameter value type (bytes, integer, or text)
+    /// determines which CBOR key (0x02/0x03/0x04) is used.
     pub fn send_vendor_config(
         &self,
         pin_token: &[u8],
@@ -522,6 +727,9 @@ impl HidTransport {
     /// CBOR map keys out of order (0x01, 0x03, 0x04, 0x02) instead of the required
     /// ascending order (0x01, 0x02, 0x03, 0x04). The pico-fido firmware strictly
     /// enforces canonical CBOR ordering per CTAP2 spec.
+    ///
+    /// Builds the authenticatorConfig CBOR map with keys in ascending order, signs
+    /// it with the PIN token, and sends it as a CTAP Config command.
     pub fn send_config(
         &self,
         sub_cmd: ConfigSubCommand,
@@ -570,6 +778,10 @@ impl HidTransport {
     }
 
     /// Send authenticatorConfig command to enable Enterprise attestation.
+    ///
+    /// Calls the EnableEnterpriseAttestation sub-command (0x01) via [`send_config`](HidTransport::send_config).
+    /// Enterprise attestation allows RPs to receive a per-device attestation certificate
+    /// during MakeCredential, enabling enterprise device identification.
     pub fn send_config_enable_ea(&self, pin_token: &[u8]) -> Result<(), PFError> {
         log::debug!("Sending Enterprise Attestation enable config command...");
         match self.send_config(
@@ -593,6 +805,10 @@ impl HidTransport {
     }
 
     /// Send authenticatorConfig command to set minimum PIN length.
+    ///
+    /// Calls the SetMinPinLength sub-command (0x03) via [`send_config`](HidTransport::send_config).
+    /// The minimum PIN length can only be increased; attempting to decrease it returns
+    /// `PIN_POLICY_VIOLATION` (0x37). A device reset is required to lower the minimum.
     pub fn send_config_set_min_pin_length(
         &self,
         pin_token: &[u8],
@@ -638,6 +854,11 @@ impl HidTransport {
         }
     }
 
+    /// Request the authenticator's P-256 ECDH public key for PIN protocol v1.
+    ///
+    /// Sends a `getClientPin` command with `getKeyAgreement` sub-command (0x02).
+    /// The returned COSE Key contains the authenticator's ephemeral public key
+    /// (x and y coordinates) used for ECDH key agreement in PIN operations.
     pub fn get_key_agreement(&self) -> Result<Value, PFError> {
         let mut map = BTreeMap::new();
         map.insert(
@@ -670,6 +891,14 @@ impl HidTransport {
         }
     }
 
+    /// Obtain an encrypted PIN token using the standard getPinToken flow.
+    ///
+    /// Implements the full CTAP2 §11.5.4 PIN token acquisition:
+    /// 1. Fetches the authenticator's key agreement public key.
+    /// 2. Generates an ephemeral P-256 key pair on the platform.
+    /// 3. Performs ECDH and derives `SHA-256(shared_secret)`.
+    /// 4. Encrypts the first 16 bytes of `SHA-256(pin)` with AES-256-CBC.
+    /// 5. Sends getPinToken (sub-command 0x05) and decrypts the response token.
     pub fn get_pin_token(&self, pin: &str) -> Result<Vec<u8>, PFError> {
         log::info!("Starting custom get_pin_token (Subcommand 0x05)...");
 
@@ -722,14 +951,12 @@ impl HidTransport {
         let pin_hash_16 = &pin_hash.as_ref()[0..16];
 
         let iv = [0u8; 16];
-        let mut block = *GenericArray::from_slice(pin_hash_16);
+        let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
 
         let shared_secret_bytes = shared_secret.as_ref();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new(
-            GenericArray::from_slice(shared_secret_bytes),
-            GenericArray::from_slice(&iv),
-        );
-        encryptor.encrypt_block_mut(&mut block);
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
+        encryptor.encrypt_block(&mut block);
         let pin_hash_enc = block.to_vec();
 
         // 6. Send getPinToken command (Subcommand 0x05)
@@ -761,12 +988,11 @@ impl HidTransport {
                 Some(Value::Bytes(token_enc)) => {
                     // Decrypt the PIN token using shared secret (AES-256-CBC, IV=0)
                     let mut token_buf = token_enc.clone();
-                    let decrypted = cbc::Decryptor::<aes::Aes256>::new(
-                        GenericArray::from_slice(shared_secret_bytes),
-                        GenericArray::from_slice(&iv),
-                    )
-                    .decrypt_padded_mut::<NoPadding>(&mut token_buf)
-                    .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
+                    let decrypted =
+                        cbc::Decryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv)
+                            .map_err(|_| PFError::Device("Failed to create decryptor".into()))?
+                            .decrypt_padded::<NoPadding>(&mut token_buf)
+                            .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
                     log::info!("Successfully obtained and decrypted PIN token (Subcommand 0x05).");
                     Ok(decrypted.to_vec())
                 }
@@ -777,6 +1003,12 @@ impl HidTransport {
         }
     }
 
+    /// Obtain a PIN token with specific permissions and optional RP ID scope.
+    ///
+    /// Like [`get_pin_token`](HidTransport::get_pin_token) but uses the
+    /// `getPinUvAuthTokenUsingPinWithPermissions` sub-command (0x09). This allows
+    /// requesting only the permissions needed (e.g., `CREDENTIAL_MANAGEMENT` for
+    /// enumeration/deletion), following the principle of least privilege.
     pub fn get_pin_token_with_permission(
         &self,
         pin: &str,
@@ -837,14 +1069,12 @@ impl HidTransport {
         let pin_hash_16 = &pin_hash.as_ref()[0..16];
 
         let iv = [0u8; 16];
-        let mut block = *GenericArray::from_slice(pin_hash_16);
+        let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
 
         let shared_secret_bytes = shared_secret.as_ref();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new(
-            GenericArray::from_slice(shared_secret_bytes),
-            GenericArray::from_slice(&iv),
-        );
-        encryptor.encrypt_block_mut(&mut block);
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
+        encryptor.encrypt_block(&mut block);
         let pin_hash_enc = block.to_vec();
 
         // 6. Send getPinUvAuthTokenUsingPinWithPermissions command (Subcommand 0x09)
@@ -884,12 +1114,11 @@ impl HidTransport {
                 Some(Value::Bytes(token_enc)) => {
                     // Decrypt the PIN token using shared secret (AES-256-CBC, IV=0)
                     let mut token_buf = token_enc.clone();
-                    let decrypted = cbc::Decryptor::<aes::Aes256>::new(
-                        GenericArray::from_slice(shared_secret_bytes),
-                        GenericArray::from_slice(&iv),
-                    )
-                    .decrypt_padded_mut::<NoPadding>(&mut token_buf)
-                    .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
+                    let decrypted =
+                        cbc::Decryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv)
+                            .map_err(|_| PFError::Device("Failed to create decryptor".into()))?
+                            .decrypt_padded::<NoPadding>(&mut token_buf)
+                            .map_err(|_| PFError::Device("Failed to decrypt PIN token".into()))?;
                     log::info!("Successfully obtained and decrypted PIN token (Subcommand 0x09).");
                     Ok(decrypted.to_vec())
                 }
@@ -902,6 +1131,16 @@ impl HidTransport {
         }
     }
 
+    /// Set a new PIN on the authenticator (sub-command 0x03).
+    ///
+    /// Implements the full CTAP2 setPin flow:
+    /// 1. Performs ECDH key agreement to derive the shared secret.
+    /// 2. Encrypts the new PIN (padded to 64 bytes) with AES-256-CBC.
+    /// 3. Computes `HMAC-SHA-256(shared_secret, newPinEnc)[0..16]` as pinUvAuthParam.
+    /// 4. Sends the SetPin command with the platform's public key, encrypted PIN, and HMAC.
+    ///
+    /// The PIN must be 4–63 characters. Fails with `PIN_POLICY_VIOLATION` (0x37) if
+    /// the PIN is too short.
     pub fn set_pin(&self, new_pin: &str) -> Result<(), PFError> {
         log::info!("Starting custom set_pin (Subcommand 0x03)...");
 
@@ -967,13 +1206,11 @@ impl HidTransport {
 
         let iv = [0u8; 16];
         let mut new_pin_enc = Vec::new();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new(
-            GenericArray::from_slice(shared_secret_bytes),
-            GenericArray::from_slice(&iv),
-        );
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
         for chunk in padded_new_pin.chunks_exact(16) {
-            let mut block = *GenericArray::from_slice(chunk);
-            encryptor.encrypt_block_mut(&mut block);
+            let mut block = Block::<aes::Aes256>::try_from(chunk).unwrap();
+            encryptor.encrypt_block(&mut block);
             new_pin_enc.extend_from_slice(&block);
         }
 
@@ -1023,6 +1260,18 @@ impl HidTransport {
         }
     }
 
+    /// Change the authenticator PIN (sub-command 0x04).
+    ///
+    /// Implements the full CTAP2 changePin flow:
+    /// 1. Performs ECDH key agreement to derive the shared secret.
+    /// 2. Encrypts `SHA-256(current_pin)[0..16]` with AES-256-CBC (pinHashEnc).
+    /// 3. Encrypts the new PIN (padded to 64 bytes) with AES-256-CBC (newPinEnc).
+    /// 4. Computes `HMAC-SHA-256(shared_secret, newPinEnc || pinHashEnc)[0..16]`.
+    /// 5. Sends the ChangePin command.
+    ///
+    /// Returns `CTAP2_ERR_PIN_AUTH_INVALID` (0x31) if the current PIN is wrong,
+    /// `CTAP2_ERR_PIN_BLOCKED` (0x32) if the PIN is blocked, or
+    /// `CTAP2_ERR_PIN_POLICY_VIOLATION` (0x37) if the new PIN violates policy.
     pub fn change_pin(&self, current_pin: &str, new_pin: &str) -> Result<(), PFError> {
         log::info!("Starting custom change_pin (Subcommand 0x04)...");
 
@@ -1085,12 +1334,10 @@ impl HidTransport {
         let pin_hash = digest::digest(&digest::SHA256, current_pin.as_bytes());
         let pin_hash_16 = &pin_hash.as_ref()[0..16];
         let iv = [0u8; 16];
-        let mut block = *GenericArray::from_slice(pin_hash_16);
-        cbc::Encryptor::<aes::Aes256>::new(
-            GenericArray::from_slice(shared_secret_bytes),
-            GenericArray::from_slice(&iv),
-        )
-        .encrypt_block_mut(&mut block);
+        let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
+        cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv)
+            .unwrap()
+            .encrypt_block(&mut block);
         let pin_hash_enc = block.to_vec();
 
         // 6. Encrypt newPinEnc
@@ -1099,13 +1346,11 @@ impl HidTransport {
         padded_new_pin[..bytes.len()].copy_from_slice(bytes);
 
         let mut new_pin_enc = Vec::new();
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new(
-            GenericArray::from_slice(shared_secret_bytes),
-            GenericArray::from_slice(&iv),
-        );
+        let mut encryptor =
+            cbc::Encryptor::<aes::Aes256>::new_from_slices(shared_secret_bytes, &iv).unwrap();
         for chunk in padded_new_pin.chunks_exact(16) {
-            let mut block = *GenericArray::from_slice(chunk);
-            encryptor.encrypt_block_mut(&mut block);
+            let mut block = Block::<aes::Aes256>::try_from(chunk).unwrap();
+            encryptor.encrypt_block(&mut block);
             new_pin_enc.extend_from_slice(&block);
         }
 
@@ -1170,7 +1415,11 @@ impl HidTransport {
         }
     }
 
-    /// Helper to sign the authenticatorConfig command
+    /// Sign an authenticatorConfig command using HMAC-SHA-256.
+    ///
+    /// Computes `HMAC-SHA-256(pin_token, 0x0d || subCommand || subCommandParams)[0..16]`
+    /// per the CTAP2 authenticatorConfig signing specification. The 0x0d byte
+    /// identifies the Config command category.
     fn sign_config_command(
         &self,
         pin_token: &[u8],
@@ -1190,6 +1439,10 @@ impl HidTransport {
         sig.as_ref()[0..16].to_vec()
     }
 
+    /// Encode an uncompressed P-256 public key as a COSE_Key map.
+    ///
+    /// Returns CBOR bytes for a map with keys: kty(1)=EC2(2), alg(3)=ES256(-7),
+    /// crv(-1)=P-256(1), x(-2), y(-3). Used in PIN key agreement payloads.
     fn encode_cose_key(&self, x: &[u8], y: &[u8]) -> Vec<u8> {
         let mut bytes = vec![0xA5]; // Map(5)
         bytes.extend(to_vec(&Value::Integer(1)).unwrap());
@@ -1205,6 +1458,11 @@ impl HidTransport {
         bytes
     }
 
+    /// Build a CBOR map for ClientPin sub-command parameters.
+    ///
+    /// Constructs the parameter map with `pinProtocol`, `subCommand`, `keyAgreement`,
+    /// and `pinHashEnc`. Optionally includes `permissions` and `rpId` when the
+    /// `getPinUvAuthTokenUsingPinWithPermissions` sub-command is used.
     fn encode_client_pin_params(
         &self,
         sub_cmd: ClientPinSubCommand,
@@ -1240,6 +1498,14 @@ impl HidTransport {
         bytes
     }
 
+    /// Enumerate all Relying Parties stored on the authenticator.
+    ///
+    /// Performs the CTAP2 credential management enumeration flow:
+    /// 1. Obtains a PIN token with `CREDENTIAL_MANAGEMENT` permission.
+    /// 2. Sends `EnumerateRpsBegin` (sub-command 0x02) to get the first RP.
+    /// 3. Iterates with `EnumerateRpsGetNextRp` (sub-command 0x03) until all RPs are returned.
+    ///
+    /// Returns an empty vector if no credentials exist on the device.
     pub fn credential_management_enumerate_rps(
         &self,
         pin: &str,
@@ -1379,6 +1645,14 @@ impl HidTransport {
         Ok(all_rps)
     }
 
+    /// Enumerate all credentials registered under a specific Relying Party.
+    ///
+    /// Given an `rp_id_hash` (SHA-256 of the RP's ID), performs:
+    /// 1. Obtains a PIN token with `CREDENTIAL_MANAGEMENT` permission.
+    /// 2. Sends `EnumerateCredentialsBegin` (sub-command 0x04) with the RP ID hash.
+    /// 3. Iterates with `EnumerateCredentialsGetNextCredential` (sub-command 0x05).
+    ///
+    /// Returns user info, credential ID, and public key for each credential.
     pub fn credential_management_enumerate_credentials(
         &self,
         pin: &str,
@@ -1550,6 +1824,12 @@ impl HidTransport {
         Ok(all_creds)
     }
 
+    /// Delete a specific credential from the authenticator.
+    ///
+    /// Obtains a PIN token with `CREDENTIAL_MANAGEMENT` permission, then sends
+    /// the `DeleteCredential` command (sub-command 0x06) with the credential ID
+    /// descriptor map. The `credential_id_map` must be a CBOR map with key 0x02
+    /// containing the credential ID.
     pub fn credential_management_delete_credential(
         &self,
         pin: &str,
@@ -1604,6 +1884,13 @@ impl HidTransport {
         Ok(())
     }
 
+    /// Sign a credential management command using HMAC-SHA-256.
+    ///
+    /// Uses pico-fido's non-standard signing scheme: for sub-commands 0x01
+    /// (GetCredsMetadata) and 0x02 (EnumerateRpsBegin), only the sub-command
+    /// byte is signed. For all others, the sub-command byte followed by the
+    /// CBOR-encoded SubCommandParams is signed. Returns the first 16 bytes
+    /// of the HMAC digest.
     fn sign_credential_mgmt_command(
         &self,
         pin_token: &[u8],
@@ -1706,10 +1993,9 @@ mod tests {
     #[test]
     fn test_pin_hash_encryption_actually_encrypts() {
         // Verify that our AES-CBC encryption actually modifies the data.
-        // This guards against the previous bug where encrypt_block_mut
+        // This guards against the previous bug where encrypt_block
         // was called on a temporary copy (buffer.into()), discarding the result.
-        use aes::cipher::generic_array::GenericArray;
-        use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+        use cbc::cipher::BlockModeEncrypt;
         use ring::digest;
 
         let pin = "123456";
@@ -1720,14 +2006,11 @@ mod tests {
         let key = [0u8; 32];
         let iv = [0u8; 16];
 
-        let mut block = *GenericArray::from_slice(pin_hash_16);
+        let mut block = Block::<aes::Aes256>::try_from(pin_hash_16).unwrap();
         let original = block;
 
-        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new(
-            GenericArray::from_slice(&key),
-            GenericArray::from_slice(&iv),
-        );
-        encryptor.encrypt_block_mut(&mut block);
+        let mut encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(&key, &iv).unwrap();
+        encryptor.encrypt_block(&mut block);
 
         // The encrypted block MUST differ from the original
         assert_ne!(

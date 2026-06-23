@@ -1,10 +1,66 @@
+//! FIDO2 / CTAP2 protocol implementation for pico-fido and RS-Key firmware.
+//!
+//! ```text
+//! fido/
+//! ├── mod.rs       — high-level FIDO2 operations (info, PIN, credentials, config)
+//! ├── constants.rs — CTAP2 command codes, CBOR map keys, COSE algorithms, bitflags
+//! └── hid.rs       — USB HID transport (CTAPHID framing, channel init, CBOR exchange)
+//! ```
+//!
+//! # Architecture
+//!
+//! Communication flows top-down:
+//!
+//! ```text
+//!  io::read_device_details()
+//!       │
+//!       ▼
+//!  fido::read_device_details()     ← this file
+//!       │
+//!       ▼
+//!  HidTransport::open()            ← hid.rs
+//!       │
+//!       ▼
+//!  USB HID (CTAPHID protocol)
+//! ```
+//!
+//! [`constants`] is imported by both `mod.rs` and `hid.rs` and should be the
+//! single source of truth for every CTAP2-defined byte value. If you need to
+//! add a new command, sub-command, or CBOR key, put it there.
+//!
+//! [`hid`] owns the raw byte-level exchange: channel ID negotiation, packet
+//! framing (init + continuation packets), PIN token acquisition, ECDH key
+//! agreement, and CBOR serialization. It exposes [`HidTransport`] which the
+//! rest of the module uses for all device I/O.
+//!
+//! [`mod.rs`] contains the public functions called from [`super::io`].
+//! Each function opens an [`HidTransport`], performs the CTAP2 operation,
+//! and parses the CBOR response into the structs defined in [`super::types`].
+//!
+//! # Vendor extensions
+//!
+//! Pico-fido firmware exposes vendor-specific CTAP commands (`0xC1`, `0xC2`)
+//! for hardware configuration (VID/PID, LED, memory stats). These are handled
+//! through [`HidTransport::send_vendor_config`] and the
+//! [`VendorConfigCommand`] enum in constants. Legacy firmware (≤7.2) uses a
+//! different physical-options encoding; see `firmware_supports_legacy_fido_hardware_config`.
+//!
+//! # Adding a new FIDO2 operation
+//!
+//! 1. Add any new command/sub-command enums to [`constants`].
+//! 2. Implement the CBOR encoding and transport call in [`hid`] (if it
+//!    requires new framing or PIN token logic).
+//! 3. Add the high-level function in this file, following the pattern:
+//!    open transport → build CBOR payload → send → parse response → return.
+//! 4. Expose it through [`super::io`].
+
 pub mod constants;
 pub mod hid;
 
 use crate::{
     device::types::{
-        AppConfig, AppConfigInput, DeviceInfo, DeviceMethod, FidoDeviceInfo, FullDeviceStatus,
-        StoredCredential,
+        AppConfig, AppConfigInput, DeviceInfo, DeviceMethod, FidoDeviceInfo, FirmwareType,
+        FullDeviceStatus, PICOFIDO_AAGUID, RSKEY_AAGUID, StoredCredential,
     },
     error::PFError,
 };
@@ -488,6 +544,26 @@ pub(crate) fn delete_credential(pin: String, credential_id_hex: String) -> Resul
     Ok("Credential deleted successfully".into())
 }
 
+pub(crate) fn reset_device() -> Result<String, String> {
+    log::info!("Starting FIDO authenticatorReset...");
+
+    let transport =
+        HidTransport::open().map_err(|e| format!("Could not open HID transport: {}", e))?;
+
+    transport.reset().map_err(|e| {
+        let s = e.to_string();
+        if s.contains("0x30") {
+            return "Reset not allowed. The device must be unplugged and re-plugged within 10 seconds before sending the reset command.".to_string();
+        }
+        if s.contains("0x27") {
+            return "Reset declined. Touch was not confirmed on the device.".to_string();
+        }
+        format!("Reset failed: {}", s)
+    })?;
+
+    Ok("Device has been factory reset. All credentials and PIN have been erased.".to_string())
+}
+
 // Custom Fido functions ( works only with pico-fido firmware )
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -553,6 +629,14 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
             .unwrap_or_else(|| "Unknown".to_string())
     };
 
+    let firmware_type = if fido_info.aaguid == RSKEY_AAGUID {
+        FirmwareType::RSKey
+    } else if fido_info.aaguid == PICOFIDO_AAGUID {
+        FirmwareType::PicoFido
+    } else {
+        FirmwareType::Unknown
+    };
+
     Ok(FullDeviceStatus {
         info: DeviceInfo {
             serial: management
@@ -566,6 +650,7 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
         secure_boot: false,
         secure_lock: false,
         method: DeviceMethod::Fido,
+        firmware_type,
     })
 }
 
@@ -1041,6 +1126,9 @@ mod tests {
             power_cycle_on_reset: None,
             led_steady: None,
             enable_secp256k1: None,
+            raw_curves_mask: None,
+            led_order: None,
+            enabled_usb_itf: None,
         }
     }
 
