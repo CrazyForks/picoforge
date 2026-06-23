@@ -1,4 +1,4 @@
-name: CI
+name: PicoForge CI
 
 on:
   push:
@@ -12,8 +12,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  ci:
-    name: CI Checks
+  checks:
+    name: Code Quality Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
