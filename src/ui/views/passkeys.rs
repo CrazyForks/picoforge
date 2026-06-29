@@ -142,19 +142,18 @@ impl PasskeysView {
         let entity = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
-            let pin_for_bg = pin.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { io::delete_credential(pin_for_bg, credential_id) })
+                .spawn(async move { io::delete_credential(pin, credential_id) })
                 .await;
 
             let _ = entity.update(cx, |this, cx| match result {
                 Ok(_) => {
                     log::info!("Credential deleted successfully.");
-                    this.refresh_credentials(pin, cx);
                     let _ = dialog_handle.update(cx, |d, cx| {
                         d.set_success("Credential deleted successfully.".to_string(), cx);
                     });
+                    this.sync_fido_state(None, cx);
                 }
                 Err(e) => {
                     log::error!("Error deleting credential: {}", e);
@@ -184,6 +183,46 @@ impl PasskeysView {
                 cx.notify();
             });
         }));
+    }
+
+    /// Re-fetch credentials using the cached PIN (used by sidebar refresh).
+    pub fn refresh_if_unlocked(&mut self, cx: &mut Context<Self>) {
+        if !self.unlocked || self.loading {
+            return;
+        }
+        let Some(pin) = self.cached_pin.clone() else {
+            return;
+        };
+        self.loading = true;
+        cx.notify();
+        self.refresh_credentials(pin, cx);
+    }
+
+    /// Re-sync all cached FIDO state after a mutation.
+    ///
+    /// Refreshes `fido_info`, optionally replaces `cached_pin`, and re-pulls
+    /// credentials when unlocked. `loading` is cleared on completion.
+    fn sync_fido_state(&mut self, new_pin: Option<String>, cx: &mut Context<Self>) {
+        if let Ok(info) = io::get_fido_info() {
+            let _ = self.root.update(cx, |root, cx| {
+                root.device.fido_info = Some(info);
+                cx.notify();
+            });
+        }
+
+        // Only update cached_pin when the caller changed it.
+        if let Some(pin) = new_pin {
+            self.cached_pin = Some(pin);
+        }
+
+        if self.unlocked
+            && let Some(pin) = self.cached_pin.clone()
+        {
+            self.refresh_credentials(pin, cx);
+            return;
+        }
+        self.loading = false;
+        cx.notify();
     }
 
     fn open_unlock_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -272,29 +311,22 @@ impl PasskeysView {
                 .spawn(async move { io::change_fido_pin(None, new) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| {
-                this.loading = false;
-                match result {
-                    Ok(msg) => {
-                        log::info!("PIN configured: {}", msg);
-                        if let Ok(info) = io::get_fido_info() {
-                            let _ = this.root.update(cx, |root, cx| {
-                                root.device.fido_info = Some(info);
-                                cx.notify();
-                            });
-                        }
-                        let _ = dialog_handle.update(cx, |d, cx| {
-                            d.set_success("PIN configured successfully.".to_string(), cx);
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("PIN setup failed: {}", e);
-                        let _ = dialog_handle.update(cx, |d, cx| {
-                            d.set_error(format!("Error: {}", e), cx);
-                        });
-                    }
+            let _ = entity.update(cx, |this, cx| match result {
+                Ok(msg) => {
+                    log::info!("PIN configured: {}", msg);
+                    let _ = dialog_handle.update(cx, |d, cx| {
+                        d.set_success("PIN configured successfully.".to_string(), cx);
+                    });
+                    this.sync_fido_state(None, cx);
                 }
-                cx.notify();
+                Err(e) => {
+                    log::error!("PIN setup failed: {}", e);
+                    this.loading = false;
+                    let _ = dialog_handle.update(cx, |d, cx| {
+                        d.set_error(format!("Error: {}", e), cx);
+                    });
+                    cx.notify();
+                }
             });
         }));
     }
@@ -457,6 +489,7 @@ impl PasskeysView {
 
         log::info!("Changing FIDO PIN...");
         let entity = cx.entity().downgrade();
+        let new_for_sync = new.clone();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -464,29 +497,22 @@ impl PasskeysView {
                 .spawn(async move { io::change_fido_pin(Some(current), new) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| {
-                this.loading = false;
-                match result {
-                    Ok(msg) => {
-                        log::info!("PIN changed: {}", msg);
-                        if let Ok(info) = io::get_fido_info() {
-                            let _ = this.root.update(cx, |root, cx| {
-                                root.device.fido_info = Some(info);
-                                cx.notify();
-                            });
-                        }
-                        let _ = dialog_handle.update(cx, |d, cx| {
-                            d.set_success("PIN changed successfully.".to_string(), cx);
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("PIN change failed: {}", e);
-                        let _ = dialog_handle.update(cx, |d, cx| {
-                            d.set_error(format!("Error: {}", e), cx);
-                        });
-                    }
+            let _ = entity.update(cx, |this, cx| match result {
+                Ok(msg) => {
+                    log::info!("PIN changed: {}", msg);
+                    let _ = dialog_handle.update(cx, |d, cx| {
+                        d.set_success("PIN changed successfully.".to_string(), cx);
+                    });
+                    this.sync_fido_state(Some(new_for_sync), cx);
                 }
-                cx.notify();
+                Err(e) => {
+                    log::error!("PIN change failed: {}", e);
+                    this.loading = false;
+                    let _ = dialog_handle.update(cx, |d, cx| {
+                        d.set_error(format!("Error: {}", e), cx);
+                    });
+                    cx.notify();
+                }
             });
         }));
     }
@@ -528,51 +554,35 @@ impl PasskeysView {
             }
 
             if !new_pin.is_empty() {
+                let new_pin_for_sync = new_pin.clone();
                 let res_pin = cx
                     .background_executor()
                     .spawn(async move { io::change_fido_pin(Some(current), new_pin) })
                     .await;
-                let _ = entity.update(cx, |this, cx| {
-                    this.loading = false;
-                    match res_pin {
-                        Ok(_) => {
-                            log::info!("Minimum length and PIN updated successfully.");
-                            if let Ok(info) = io::get_fido_info() {
-                                let _ = this.root.update(cx, |root, cx| {
-                                    root.device.fido_info = Some(info);
-                                    cx.notify();
-                                });
-                            }
-                            let _ = status_handle.update(cx, |s, cx| {
-                                s.set_success("Minimum length and PIN updated.".to_string(), cx);
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Length set, but PIN change failed: {}", e);
-                            let _ = status_handle.update(cx, |s, cx| {
-                                s.set_error(
-                                    format!("Length set, but PIN change failed: {}", e),
-                                    cx,
-                                );
-                            });
-                        }
+                let _ = entity.update(cx, |this, cx| match res_pin {
+                    Ok(_) => {
+                        log::info!("Minimum length and PIN updated successfully.");
+                        let _ = status_handle.update(cx, |s, cx| {
+                            s.set_success("Minimum length and PIN updated.".to_string(), cx);
+                        });
+                        this.sync_fido_state(Some(new_pin_for_sync), cx);
                     }
-                    cx.notify();
+                    Err(e) => {
+                        log::error!("Length set, but PIN change failed: {}", e);
+                        this.loading = false;
+                        let _ = status_handle.update(cx, |s, cx| {
+                            s.set_error(format!("Length set, but PIN change failed: {}", e), cx);
+                        });
+                        cx.notify();
+                    }
                 });
             } else {
                 let _ = entity.update(cx, |this, cx| {
-                    this.loading = false;
                     log::info!("Minimum PIN length updated to {}.", min_len);
-                    if let Ok(info) = io::get_fido_info() {
-                        let _ = this.root.update(cx, |root, cx| {
-                            root.device.fido_info = Some(info);
-                            cx.notify();
-                        });
-                    }
                     let _ = status_handle.update(cx, |s, cx| {
                         s.set_success(format!("Minimum length updated to {}.", min_len), cx);
                     });
-                    cx.notify();
+                    this.sync_fido_state(None, cx);
                 });
             }
         }));
@@ -706,29 +716,22 @@ impl PasskeysView {
                 .spawn(async move { io::enable_enterprise_attestation(pin) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| {
-                this.loading = false;
-                match result {
-                    Ok(msg) => {
-                        log::info!("{}", msg);
-                        if let Ok(info) = io::get_fido_info() {
-                            let _ = this.root.update(cx, |root, cx| {
-                                root.device.fido_info = Some(info);
-                                cx.notify();
-                            });
-                        }
-                        let _ = dialog_handle.update(cx, |d, cx| {
-                            d.set_success(msg, cx);
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("Failed to enable EA: {}", e);
-                        let _ = dialog_handle.update(cx, |d, cx| {
-                            d.set_error(format!("Error: {}", e), cx);
-                        });
-                    }
+            let _ = entity.update(cx, |this, cx| match result {
+                Ok(msg) => {
+                    log::info!("{}", msg);
+                    let _ = dialog_handle.update(cx, |d, cx| {
+                        d.set_success(msg, cx);
+                    });
+                    this.sync_fido_state(None, cx);
                 }
-                cx.notify();
+                Err(e) => {
+                    log::error!("Failed to enable EA: {}", e);
+                    this.loading = false;
+                    let _ = dialog_handle.update(cx, |d, cx| {
+                        d.set_error(format!("Error: {}", e), cx);
+                    });
+                    cx.notify();
+                }
             });
         }));
     }
@@ -1177,7 +1180,6 @@ impl PasskeysView {
                 .await;
 
             let _ = entity.update(cx, |this, cx| {
-                this.loading = false;
                 match result {
                     Ok(msg) => {
                         log::info!("Device Reset: {}", msg);
@@ -1188,15 +1190,18 @@ impl PasskeysView {
                         cx.emit(PasskeysEvent::Notification(
                             "Device reset successfully".into(),
                         ));
+                        this.lock_storage(cx);
+                        this.sync_fido_state(None, cx);
                     }
                     Err(e) => {
                         log::error!("Error resetting device: {}", e);
+                        this.loading = false;
                         let _ = status_handle.update(cx, |d, cx| {
                             d.set_error(format!("Reset failed: {}", e), cx);
                         });
+                        cx.notify();
                     }
                 }
-                cx.notify();
             });
         }));
     }

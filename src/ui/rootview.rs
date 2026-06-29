@@ -60,6 +60,10 @@ impl ApplicationRoot {
 
                 if device_changed {
                     self.views.passkeys = None;
+                } else if let Some(passkeys_view) = &self.views.passkeys {
+                    passkeys_view.update(cx, |view, cx| {
+                        view.refresh_if_unlocked(cx);
+                    });
                 }
 
                 match io::get_fido_info() {
@@ -97,6 +101,8 @@ impl ApplicationRoot {
                 self.device.fido_info = None;
                 self.device.led_status = None;
                 self.device.management_apps = None;
+                // Drop cached passkeys view (and cached PIN) on disconnect.
+                self.views.passkeys = None;
             }
         }
         self.device.loading = false;
