@@ -1,0 +1,31 @@
+name: Mirror
+on:
+  push:
+  create:
+  delete:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mirror-gitlab:
+    concurrency:
+      group: ${{ github.workflow }}-gitlab
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: git clone --bare "https://github.com/librekeys/picoforge" .
+      - run: git push --mirror "https://${GITLAB_USERNAME}:${GITLAB_TOKEN}@gitlab.com/librekeys/picoforge.git"
+        env:
+          GITLAB_USERNAME: ${{ secrets.GITLAB_USERNAME }}
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+  mirror-codeberg:
+    concurrency:
+      group: ${{ github.workflow }}-codeberg
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - run: git clone --bare "https://github.com/librekeys/picoforge" .
+      - run: git push --mirror "https://${CODEBERG_USERNAME}:${CODEBERG_TOKEN}@codeberg.org/librekeys/picoforge.git"
+        env:
+          CODEBERG_USERNAME: ${{ secrets.CODEBERG_USERNAME }}
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
