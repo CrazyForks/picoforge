@@ -193,7 +193,7 @@ pub(super) enum StatusDialogHandle {
     Status(WeakEntity<StatusContent>),
 }
 
-pub struct ConfigView {
+pub struct ConfigViewModel {
     pub(super) device: Entity<DeviceRepo>,
     pub(super) vendor_select: Entity<SelectState<Vec<VendorSelectOption>>>,
     pub(super) vid_input: Entity<InputState>,
@@ -221,7 +221,7 @@ pub struct ConfigView {
     pub(super) _task: Option<Task<()>>,
 }
 
-impl ConfigView {
+impl ConfigViewModel {
     pub fn new(window: &mut Window, cx: &mut Context<Self>, models: &AppModels) -> Self {
         let device = models.device.clone();
         cx.subscribe(&device, |_, _, _: &DeviceEvent, cx| cx.notify())

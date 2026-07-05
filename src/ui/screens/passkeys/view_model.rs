@@ -10,7 +10,7 @@ use gpui::*;
 use gpui_component::button::ButtonVariants;
 use gpui_component::{ActiveTheme, StyledExt, WindowExt};
 
-pub struct PasskeysView {
+pub struct PasskeysViewModel {
     pub(super) device: Entity<DeviceRepo>,
     pub(super) credentials: Vec<StoredCredential>,
     pub(super) unlocked: bool,
@@ -26,9 +26,9 @@ pub enum PasskeysEvent {
     Notification(String),
 }
 
-impl EventEmitter<PasskeysEvent> for PasskeysView {}
+impl EventEmitter<PasskeysEvent> for PasskeysViewModel {}
 
-impl PasskeysView {
+impl PasskeysViewModel {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>, models: &AppModels) -> Self {
         let device = models.device.clone();
         cx.subscribe(&device, |_, _, _: &DeviceEvent, cx| cx.notify())

@@ -91,18 +91,18 @@
 //!
 //! ### Where to Start
 //!
-//! - **New to the codebase?** Start with `src/main.rs` (this file) and `src/ui/rootview.rs`
+//! - **New to the codebase?** Start with `src/main.rs` (this file) and `src/ui/app.rs`
 //!   to understand the application entry point and main window structure.
 //!
-//! - **Want to understand device communication?** Read `src/device/mod.rs` and
-//!   `src/device/io.rs` for the high-level API, then dive into `src/device/rescue/mod.rs`
-//!   (PC/SC protocol) or `src/device/fido/mod.rs` (FIDO2/CTAP2 protocol).
+//! - **Want to understand device communication?** Read `src/hal/mod.rs` and
+//!   `src/hal/io.rs` for the high-level API, then dive into `src/hal/rescue/mod.rs`
+//!   (PC/SC protocol) or `src/hal/fido/mod.rs` (FIDO2/CTAP2 protocol).
 //!
-//! - **Working on UI features?** Explore `src/ui/views/` for page implementations and
-//!   `src/ui/components/` for reusable widgets. See `src/ui/types.rs` for state types.
+//! - **Working on UI features?** Explore `src/ui/screens/` for page implementations and
+//!   `src/ui/components/` for reusable widgets. See `src/ui/models/` for shared state.
 //!
-//! - **Adding new device commands?** Check `src/device/fido/constants.rs` and
-//!   `src/device/rescue/constants.rs` for protocol constants, then implement in the
+//! - **Adding new device commands?** Check `src/hal/fido/constants.rs` and
+//!   `src/hal/rescue/constants.rs` for protocol constants, then implement in the
 //!   appropriate protocol module.
 //!
 //! ---
@@ -143,7 +143,7 @@
 //! │   ├── main.rs                         # ← THIS FILE: Application entry point
 //! │   ├── error.rs                        # Application-wide error types (PFError)
 //! │   ├── logging.rs                      # log4rs configuration
-//! │   ├── device/                         # Hardware communication layer
+//! │   ├── hal/                            # Hardware abstraction layer
 //! │   │   ├── mod.rs                      # Module root, re-exports
 //! │   │   ├── io.rs                       # High-level API bridging rescue and FIDO
 //! │   │   ├── types.rs                    # Shared data structures
@@ -156,17 +156,34 @@
 //! │   │       └── hid.rs                  # USB HID transport
 //! │   └── ui/                             # GPUI frontend
 //! │       ├── mod.rs
-//! │       ├── rootview.rs                 # Main window, sidebar routing
-//! │       ├── types.rs                    # UI state types
+//! │       ├── app.rs                      # ApplicationRoot, AppModels, layout, Render
 //! │       ├── assets.rs                   # rust-embed asset loader
 //! │       ├── colors.rs                   # Theme color constants
-//! │       ├── views/                      # Page views (sidebar sections)
+//! │       ├── models/                     # Shared reactive state (DeviceRepo)
 //! │       │   ├── mod.rs
-//! │       │   ├── home.rs
-//! │       │   ├── passkeys.rs
-//! │       │   ├── config.rs
-//! │       │   ├── security.rs
-//! │       │   └── about.rs
+//! │       │   └── device.rs
+//! │       ├── screens/                    # Page views (sidebar sections)
+//! │       │   ├── mod.rs
+//! │       │   ├── home/
+//! │       │   │   ├── mod.rs
+//! │       │   │   ├── view.rs
+//! │       │   │   └── view_model.rs
+//! │       │   ├── passkeys/
+//! │       │   │   ├── mod.rs
+//! │       │   │   ├── view.rs
+//! │       │   │   └── view_model.rs
+//! │       │   ├── config/
+//! │       │   │   ├── mod.rs
+//! │       │   │   ├── view.rs
+//! │       │   │   └── view_model.rs
+//! │       │   ├── security/
+//! │       │   │   ├── mod.rs
+//! │       │   │   ├── view.rs
+//! │       │   │   └── view_model.rs
+//! │       │   └── about/
+//! │       │       ├── mod.rs
+//! │       │       ├── view.rs
+//! │       │       └── view_model.rs
 //! │       └── components/                 # Reusable UI widgets
 //! │           ├── mod.rs
 //! │           ├── button.rs
@@ -257,22 +274,22 @@
 //! ┌─────────────────────────────────────────────────────────────┐
 //! │                    UI Layer (src/ui/)                       │
 //! │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
-//! │  │ HomeView │  │Passkeys  │  │ConfigView│  │Security  │     │
-//! │  │          │  │View      │  │          │  │View      │     │
+//! │  │ HomeView │  │Passkeys  │  │ConfigVM  │  │Security  │     │
+//! │  │          │  │ViewModel │  │          │  │View      │     │
 //! │  └────┬─────┘  └─────┬────┘  └──────┬───┘  └───────┬──┘     │
 //! │       │              │              │              │        │
 //! │       └──────────────┴──────┬───────┴──────────────┘        │
 //! │                             │                               │
 //! │                    ┌────────▼────────┐                      │
-//! │                    │ ApplicationRoot │ (rootview.rs)        │
-//! │                    │  DeviceState    │                      │
+//! │                    │ ApplicationRoot │ (app.rs)             │
+//! │                    │  AppModels      │                      │
 //! │                    │  LayoutState    │                      │
-//! │                    │  ViewCache      │                      │
+//! │                    │  ViewModelStore │                      │
 //! │                    └────────┬────────┘                      │
 //! └─────────────────────────────┼───────────────────────────────┘
 //!                               │
 //! ┌─────────────────────────────▼───────────────────────────────┐
-//! │                  Device I/O Layer (src/device/io.rs)        │
+//! │                  Hardware I/O Layer (src/hal/io.rs)         │
 //! │         High-level API: read_device_details()               │
 //! │                         write_config()                      │
 //! │                         get_credentials()                   │
@@ -283,7 +300,7 @@
 //!              │                                 │
 //! ┌────────────▼────────────┐  ┌─────────────────▼─────────────┐
 //! │  Rescue Protocol        │  │  FIDO2 Protocol               │
-//! │  (src/device/rescue/)   │  │  (src/device/fido/)           │
+//! │  (src/hal/rescue/)      │  │  (src/hal/fido/)              │
 //! │                         │  │                               │
 //! │  PC/SC + ISO 7816-4     │  │  CTAPHID + CTAP2              │
 //! │  APDU commands          │  │  CBOR messages                │
@@ -303,8 +320,8 @@
 //!
 //! ### Key Design Principles
 //!
-//! 1. **Separation of Concerns**: Device communication (`src/device/`) is completely
-//!    separate from UI code (`src/ui/`). No GPUI imports exist in device modules.
+//! 1. **Separation of Concerns**: Device communication (`src/hal/`) is completely
+//!    separate from UI code (`src/ui/`). No GPUI imports exist in HAL modules.
 //!
 //! 2. **Protocol Abstraction**: The `io.rs` layer provides a unified API that
 //!    automatically selects Rescue or FIDO2 based on device capabilities and
@@ -314,8 +331,8 @@
 //!    and RS-Key (Rust firmware) with the same UI, detecting firmware type via
 //!    AAGUID and adapting behavior accordingly.
 //!
-//! 4. **State-Driven UI**: The `ApplicationRoot` maintains device state and
-//!    propagates changes to views via the `DeviceConnectionState` struct.
+//! 4. **State-Driven UI**: The `ApplicationRoot` holds `AppModels` with a reactive
+//!    `Entity<DeviceRepo>` that views subscribe to via `DeviceEvent::Updated`.
 //!
 //! ---
 //!
@@ -346,7 +363,7 @@
 //!                 └── Vendor commands (0xC1/0xC2)
 //!
 //!       ▼
-//! Update DeviceConnectionState
+//! Update DeviceRepo
 //!       │
 //!       ├── status: FullDeviceStatus
 //!       ├── fido_info: FidoDeviceInfo
@@ -360,7 +377,7 @@
 //! ### Configuration Write Flow
 //!
 //! ```text
-//! User edits config form (ConfigView)
+//! User edits config form (ConfigViewModel)
 //!       │
 //!       ▼
 //! io::write_config(config, method, pin)
@@ -387,7 +404,7 @@
 //! ### Credential Management Flow
 //!
 //! ```text
-//! PasskeysView::unlock_storage(pin)
+//! PasskeysViewModel::unlock_storage(pin)
 //!       │
 //!       ▼
 //! io::get_credentials(pin)
@@ -407,7 +424,7 @@
 //! Parse CBOR responses → Vec<StoredCredential>
 //!       │
 //!       ▼
-//! Display credentials in PasskeysView table
+//! Display credentials in PasskeysViewModel table
 //! ```
 //!
 //! ---
@@ -503,9 +520,9 @@
 //! ```text
 //! ApplicationRoot::new(cx)
 //!       │
-//!       ├── DeviceConnectionState::new()
+//!       ├── AppModels { device: Entity<DeviceRepo> }
 //!       ├── LayoutState::new()
-//!       ├── ViewCache::new()
+//!       ├── ViewModelStore::new()               [all None, lazy-init]
 //!       │
 //!       └── refresh_device_status() → io::read_device_details()
 //!
@@ -515,21 +532,22 @@
 //!       │     └── on_select → updates LayoutState.active_view
 //!       │
 //!       └── Render content based on active_view:
-//!             ├── Home → HomeView::build() [stateless]
-//!             ├── Passkeys → PasskeysView::new() [stateful, cached]
-//!             ├── Configuration → ConfigView::new() [stateful, cached]
-//!             ├── Security → SecurityView::build() [stateless]
-//!             └── About → AboutView::build() [stateless]
+//!             ├── Home → HomeViewModel::new()        [lazy, cached]
+//!             ├── Passkeys → PasskeysViewModel::new() [lazy, cached]
+//!             ├── Configuration → ConfigViewModel::new() [lazy, cached]
+//!             ├── Security → SecurityViewModel::new()   [lazy, cached]
+//!             └── About → AboutViewModel::new()         [lazy, cached]
 //! ```
 //!
 //! ### State Management
 //!
-//! - **DeviceConnectionState**: Holds device status, FIDO info, LED config, errors
+//! - **AppModels**: Dependency injection bag holding `Entity<DeviceRepo>`
+//! - **DeviceRepo**: Reactive device state (status, FIDO info, LED config, errors)
 //! - **LayoutState**: Active view, sidebar width/collapse state
-//! - **ViewCache**: Cached entity views (PasskeysView, ConfigView) to preserve state
+//! - **ViewModelStore**: Lazy-initialized cached entity views, all use `get_or_insert_with`
 //!
-//! State flows downward from `ApplicationRoot` to views via props. Views communicate
-//! upward via callbacks (`on_select`, `on_refresh`) and events (`PasskeysEvent`).
+//! State flows via `Entity<T>::read(cx)`. Views subscribe to `DeviceEvent::Updated`
+//! and communicate upward via callbacks (`on_select`, `on_refresh`) and events (`PasskeysEvent`).
 //!
 //! ---
 //!

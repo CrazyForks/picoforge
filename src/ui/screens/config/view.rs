@@ -4,7 +4,7 @@ use crate::hal::rescue::constants::{
 };
 use crate::hal::types::DeviceMethod;
 use crate::ui::components::{card::Card, page_view::PageView};
-use crate::ui::screens::config::view_model::ConfigView;
+use crate::ui::screens::config::view_model::ConfigViewModel;
 use gpui::*;
 use gpui_component::button::{ButtonCustomVariant, ButtonVariants};
 use gpui_component::{
@@ -12,7 +12,7 @@ use gpui_component::{
     slider::Slider, switch::Switch, v_flex,
 };
 
-impl ConfigView {
+impl ConfigViewModel {
     fn render_identity_card(
         &self,
         theme: &Theme,
@@ -549,7 +549,7 @@ impl ConfigView {
     }
 }
 
-impl Render for ConfigView {
+impl Render for ConfigViewModel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let has_device = self.device.read(cx).status.is_some();
@@ -581,7 +581,7 @@ impl Render for ConfigView {
         let is_fido = status.as_ref().map(|s| s.method.clone()) == Some(DeviceMethod::Fido);
         let supports_legacy_fido_config = status
             .as_ref()
-            .map(ConfigView::status_supports_legacy_fido_config)
+            .map(ConfigViewModel::status_supports_legacy_fido_config)
             .unwrap_or(false);
         let hardware_config_disabled = is_fido && !supports_legacy_fido_config;
 

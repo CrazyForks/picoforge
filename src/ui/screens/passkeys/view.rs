@@ -5,7 +5,7 @@ use crate::ui::components::{
     dialog,
     page_view::PageView,
 };
-use crate::ui::screens::passkeys::view_model::{PasskeysEvent, PasskeysView};
+use crate::ui::screens::passkeys::view_model::{PasskeysEvent, PasskeysViewModel};
 use directories::UserDirs;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -15,7 +15,7 @@ use gpui_component::{
     ActiveTheme, Icon, Sizable, StyledExt, Theme, badge::Badge, h_flex, switch::Switch, v_flex,
 };
 
-impl PasskeysView {
+impl PasskeysViewModel {
     fn render_enterprise_attestation(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let csr_ready = self.csr_pem.is_some();
         let show_csr = self.show_csr && csr_ready;
@@ -686,7 +686,7 @@ impl PasskeysView {
     }
 }
 
-impl Render for PasskeysView {
+impl Render for PasskeysViewModel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let device = self.device.read(cx);
         let device_connected = device.status.is_some();
