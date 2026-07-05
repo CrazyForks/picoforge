@@ -26,6 +26,8 @@ The primary repository is hosted on GitHub, but a read-only mirror is available.
 | Platform                      | URL                                              | Purpose                           |
 | :---------------------------- | :----------------------------------------------- | :-------------------------------- |
 | **GitHub (Primary Source)**   | `https://github.com/librekeys/picoforge.git`     | Required for Contribution Forking |
+| **GitLab Mirror**             | `https://gitlab.com/librekeys/picoforge`         | Read-only viewing and cloning     |
+| **Codeberg Mirror**           | `https://codeberg.org/librekeys/picoforge`       | Read-only viewing and cloning     |
 | **Personal Mirror**           | `https://git.suyogtandel.in/LibreKeys/picoforge` | Read-only viewing and cloning     |
 
 
