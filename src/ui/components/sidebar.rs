@@ -1,6 +1,6 @@
 use crate::ui::app::Destination;
 use crate::ui::components::button::PFIconButton;
-use crate::ui::models::device::{DeviceMethod, DeviceRepo, FirmwareType};
+use crate::ui::models::device::{DeviceMethod, DeviceRepo};
 use gpui::*;
 use gpui_component::{
     ActiveTheme, Icon, IconName, Side,
@@ -252,20 +252,10 @@ impl Render for AppSidebar {
                             )
                             .child({
                                 let (text, color_bg, color_text) = if let Some(s) = &status_owned {
-                                    let is_rskey = s.firmware_type == FirmwareType::RSKey;
-                                    let fw_label = if is_rskey { "RS-Key" } else { "Pico-FIDO" };
                                     if s.method == DeviceMethod::Fido {
-                                        (
-                                            format!("Online - FIDO ({})", fw_label),
-                                            rgb(0xf59e0b),
-                                            rgb(0xffffff),
-                                        )
+                                        ("Online - FIDO".to_string(), rgb(0xf59e0b), rgb(0xffffff))
                                     } else {
-                                        (
-                                            format!("Online - {}", fw_label),
-                                            rgb(0x16a34a),
-                                            rgb(0xffffff),
-                                        )
+                                        ("Online".to_string(), rgb(0x16a34a), rgb(0xffffff))
                                     }
                                 } else if error_owned.is_some() {
                                     ("Error".to_string(), rgb(0xd97706), rgb(0xffffff))

@@ -43,7 +43,7 @@ jobs:
       - name: Run tests
         run: nix develop --command cargo test --verbose
 
-  build-matrix:
+  verify-build:
     name: Build (${{ matrix.platform }} / ${{ matrix.target }})
     needs: checks
     strategy:

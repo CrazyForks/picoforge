@@ -104,7 +104,7 @@ pub enum FirmwareType {
 impl fmt::Display for FirmwareType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PicoFido => write!(f, "Pico-FIDO"),
+            Self::PicoFido => write!(f, "pico-fido"),
             Self::RSKey => write!(f, "RS-Key"),
             Self::Unknown => write!(f, "Unknown"),
         }
