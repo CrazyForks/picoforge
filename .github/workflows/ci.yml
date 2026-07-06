@@ -3,13 +3,17 @@ name: PicoForge CI
 on:
   push:
     branches:
-      - '**'
+      - "**"
   pull_request:
     branches:
-      - '**'
+      - "**"
 
 env:
   CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   checks:
@@ -38,3 +42,50 @@ jobs:
 
       - name: Run tests
         run: nix develop --command cargo test --verbose
+
+  build-matrix:
+    name: Build (${{ matrix.platform }} / ${{ matrix.target }})
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-13
+            target: x86_64-apple-darwin
+          - platform: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: windows-latest
+            target: i686-pc-windows-msvc
+          - platform: windows-latest
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}-${{ matrix.target }}
+
+      - name: install dependencies (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt install -y \
+            pkg-config libpcsclite-dev libudev-dev libvulkan-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev \
+            libxcb1-dev libxkbcommon-x11-dev libfontconfig1-dev \
+            libasound2-dev libdbus-1-dev libx11-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libusb-1.0-0-dev
+
+      - name: Build
+        run: cargo build --verbose --target ${{ matrix.target }}
