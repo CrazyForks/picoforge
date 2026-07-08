@@ -170,7 +170,7 @@ impl DeviceRepo {
     }
 
     pub fn check_hid_available_blocking() -> bool {
-        crate::hal::fido::hid::HidTransport::open().is_ok()
+        crate::hal::transport::fido::HidTransport::open().is_ok()
     }
 
     // ── State mutation (called from ViewModel after background work) ───────

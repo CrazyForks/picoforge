@@ -55,7 +55,8 @@
 //! 4. Expose it through [`super::io`].
 
 pub mod constants;
-pub mod hid;
+pub mod ops;
+use crate::hal::transport::fido::{CTAPHID_CBOR, HidTransport};
 
 use crate::{
     error::PFError,
@@ -70,7 +71,8 @@ use crate::{
 };
 use base64::{Engine as _, engine::general_purpose};
 use constants::*;
-use hid::*;
+use ops::FidoOperations;
+
 use serde_cbor_2::{Value, from_slice, to_vec};
 use std::collections::BTreeMap;
 
@@ -1201,15 +1203,8 @@ fn validate_fido_config_changes(
     config: &AppConfigInput,
     firmware: &AnyFirmware,
 ) -> Result<(), PFError> {
-    let can_write_fido_config = firmware.supports_fido_config_write();
-
-    // RS-Key v0.3.1+ and legacy PicoFido devices with VendorPrototype 0xFF
-    // (CONFIG_PHY_* commands) support hardware config over FIDO.
-    // Pico-fido v7.4+ and RS-Key <v0.3.1 require Rescue (CCID).
-    // Note: The version check for RS-Key is unreliable because CTAP GET_INFO
-    // reports the SDK version (5.x), not the RS-Key release version. Runtime
-    // capability probing in write_rskey_config handles actual support detection.
-    let allow_write = can_write_fido_config;
+    let allow_write = firmware.supports_legacy_fido_hardware_config()
+        || firmware.supports_rs_key_vendor_command();
     if !allow_write {
         if config.vid.is_some()
             || config.pid.is_some()

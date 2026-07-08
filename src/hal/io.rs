@@ -137,7 +137,7 @@ pub fn write_config(
 pub fn read_led_config(method: DeviceMethod) -> Result<LedStatusConfig, PFError> {
     match method {
         DeviceMethod::Fido => {
-            let transport = crate::hal::fido::hid::HidTransport::open()?;
+            let transport = crate::hal::transport::fido::HidTransport::open()?;
             fido::read_rskey_led_config(&transport)
         }
         DeviceMethod::Rescue => rescue::read_led_config(),
@@ -154,7 +154,7 @@ pub fn write_led_config(
             let pin = pin.ok_or_else(|| {
                 PFError::Device("PIN is required for FIDO LED config write".into())
             })?;
-            let transport = crate::hal::fido::hid::HidTransport::open()?;
+            let transport = crate::hal::transport::fido::HidTransport::open()?;
             fido::write_rskey_led_config(&transport, &config, &pin)
         }
         DeviceMethod::Rescue => {
@@ -170,7 +170,7 @@ pub fn write_led_config(
 pub fn read_management_config(method: DeviceMethod) -> Result<ManagementAppConfig, PFError> {
     match method {
         DeviceMethod::Fido => {
-            let transport = crate::hal::fido::hid::HidTransport::open()?;
+            let transport = crate::hal::transport::fido::HidTransport::open()?;
             let info = fido::read_rskey_management_info(&transport)?;
             Ok(ManagementAppConfig {
                 usb_supported: info.usb_supported.unwrap_or(0),
@@ -191,7 +191,7 @@ pub fn write_management_config(
             let pin = pin.ok_or_else(|| {
                 PFError::Device("PIN is required for FIDO management config write".into())
             })?;
-            let transport = crate::hal::fido::hid::HidTransport::open()?;
+            let transport = crate::hal::transport::fido::HidTransport::open()?;
             fido::write_rskey_dev_config(&transport, enabled_mask, &pin)
         }
         DeviceMethod::Rescue => rescue::write_management_config(enabled_mask),

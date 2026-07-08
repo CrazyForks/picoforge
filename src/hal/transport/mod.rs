@@ -1,19 +1,24 @@
 use std::fmt;
 
 use crate::error::PFError;
-use crate::hal::fido::hid::HidTransport;
 use crate::hal::types::FirmwareType;
+
+pub mod fido;
+use fido::HidTransport;
+
+pub mod pcsc;
+use pcsc::PcscTransport;
 
 pub enum DeviceHandle {
     Fido(HidTransport),
-    Rescue(FirmwareType),
+    Rescue(PcscTransport),
 }
 
 impl fmt::Debug for DeviceHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Fido(t) => f.debug_tuple("Fido").field(t).finish(),
-            Self::Rescue(ft) => f.debug_tuple("Rescue").field(ft).finish(),
+            Self::Rescue(t) => f.debug_tuple("Rescue").field(&t.firmware_type).finish(),
         }
     }
 }
@@ -31,7 +36,7 @@ impl DeviceHandle {
     pub fn firmware_type(&self) -> FirmwareType {
         match self {
             Self::Fido(_) => FirmwareType::Unknown,
-            Self::Rescue(ft) => ft.clone(),
+            Self::Rescue(t) => t.firmware_type.clone(),
         }
     }
 
@@ -82,31 +87,18 @@ impl DeviceHandle {
 
     /// Try to connect via Rescue PC/SC transport.
     pub fn try_rescue() -> Result<Option<(Self, DeviceIdentity)>, PFError> {
-        let ctx = pcsc::Context::establish(pcsc::Scope::User).map_err(PFError::Pcsc)?;
-        let mut readers_buf = [0; 2048];
-        let mut readers = ctx.list_readers(&mut readers_buf).map_err(PFError::Pcsc)?;
-        let reader = match readers.next() {
-            Some(r) => r,
-            None => return Ok(None),
-        };
-        let reader_name = reader.to_string_lossy();
-        let fw_type = if reader_name.contains("RS-Key") || reader_name.contains("RSK") {
-            FirmwareType::RSKey
-        } else {
-            FirmwareType::Unknown
-        };
-        // Connection opened just to verify the reader is responsive;
-        // actual rescue operations open their own PC/SC connections.
-        let card = ctx
-            .connect(reader, pcsc::ShareMode::Shared, pcsc::Protocols::ANY)
-            .map_err(PFError::Pcsc)?;
-        drop(card);
-        let identity = DeviceIdentity {
-            vid: 0,
-            pid: 0,
-            product_name: reader_name.to_string(),
-            firmware_type: fw_type.clone(),
-        };
-        Ok(Some((Self::Rescue(fw_type), identity)))
+        match PcscTransport::open() {
+            Ok(transport) => {
+                let identity = DeviceIdentity {
+                    vid: 0,
+                    pid: 0,
+                    product_name: "Rescue Device".into(),
+                    firmware_type: transport.firmware_type.clone(),
+                };
+                Ok(Some((Self::Rescue(transport), identity)))
+            }
+            Err(PFError::NoDevice) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
