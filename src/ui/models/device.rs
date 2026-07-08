@@ -30,7 +30,9 @@ pub use types::{
 
 // ── Events ──────────────────────────────────────────────────────────────────
 
+/// Events emitted by [`DeviceRepo`] to notify subscribers of state changes.
 pub enum DeviceEvent {
+    /// Device details were refreshed.
     Updated,
 }
 
@@ -38,6 +40,7 @@ impl EventEmitter<DeviceEvent> for DeviceRepo {}
 
 // ── Snapshot returned by post-write state refresh ───────────────────────────
 
+/// Snapshot of device state produced by a blocking HAL read.
 #[derive(Clone)]
 pub struct FreshDeviceState {
     pub status: types::FullDeviceStatus,
@@ -58,6 +61,7 @@ pub struct DeviceRepo {
 }
 
 impl DeviceRepo {
+    /// Create a new device repo in the disconnected state.
     pub fn new() -> Self {
         Self {
             status: None,
@@ -202,6 +206,7 @@ impl DeviceRepo {
 
     // ── Polling cycle ──────────────────────────────────────────────────────
 
+    /// Initiate a device-details refresh (async, emits [`DeviceEvent::Updated`] on completion).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
@@ -248,15 +253,18 @@ impl DeviceRepo {
 
     // ── State lifecycle helpers ────────────────────────────────────────────
 
+    /// Mark the repo as loading.
     pub fn begin_load(&mut self) {
         self.loading = true;
         self.error = None;
     }
 
+    /// Mark the repo as finished loading.
     pub fn end_load(&mut self) {
         self.loading = false;
     }
 
+    /// Set an error state on the repo.
     pub fn set_error(&mut self, error: String) {
         self.status = None;
         self.fido_info = None;

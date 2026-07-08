@@ -71,7 +71,8 @@
 //!
 //! - [`HidTransport`] — main transport struct; opens HID device, negotiates
 //!   CID, sends/receives CBOR payloads
-//! - [`EnumerateRpResponse`], [`EnumerateCredentialResponse`] — response
+//! - [`EnumerateRpResponse`](crate::hal::fido::ops::EnumerateRpResponse),
+//!   [`EnumerateCredentialResponse`](crate::hal::fido::ops::EnumerateCredentialResponse) — response
 //!   types for credential management enumeration
 //! - PIN methods (`get_pin_token`, `set_pin`, `change_pin`) implement the
 //!   full ECDH + AES-CBC flow per CTAP2 §11.5.4

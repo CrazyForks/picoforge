@@ -1,3 +1,18 @@
+//! Device discovery and transport abstraction.
+//!
+//! Two physical transports coexist:
+//!
+//! * **FIDO HID** ([`fido::HidTransport`]) — the primary CTAP2 / CTAPHID channel
+//!   over USB HID. Used for normal operations (credential management, PIN,
+//!   authentication). Supports both pico-fido and RS-Key firmwares.
+//! * **Rescue PC/SC** ([`pcsc::PcscTransport`]) — an ISO 7816-4 APDU channel over
+//!   a PC/SC smart-card reader. Used when the device is in rescue/bootloader mode
+//!   or when FIDO commands are blocked (e.g. firmware version ≥ 7.4 on pico-fido).
+//!
+//! The [`DeviceHandle::discover`] method tries FIDO HID first and falls back to
+//! PC/SC. This ensures normal operation prefers the faster HID path while still
+//! allowing rescue access when needed.
+
 use std::fmt;
 
 use crate::error::PFError;
@@ -9,8 +24,11 @@ use fido::HidTransport;
 pub mod pcsc;
 use pcsc::PcscTransport;
 
+/// A connected device handle over either the FIDO or rescue transport.
 pub enum DeviceHandle {
+    /// Connected via CTAPHID (USB HID).
     Fido(HidTransport),
+    /// Connected via PC/SC (ISO 7816-4 APDU, rescue/bootloader mode).
     Rescue(PcscTransport),
 }
 
@@ -23,16 +41,25 @@ impl fmt::Debug for DeviceHandle {
     }
 }
 
+/// Opaque device identity presented to consumers after discovery.
+///
+/// vid/pid are populated only for the FIDO HID path; the rescue path
+/// reports (0, 0) since PC/SC does not expose USB identifiers.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct DeviceIdentity {
+    /// USB Vendor ID (0 for rescue/PC/SC).
     pub vid: u16,
+    /// USB Product ID (0 for rescue/PC/SC).
     pub pid: u16,
+    /// Human-readable product name.
     pub product_name: String,
+    /// Detected firmware type (unknown for FIDO HID until GetInfo is called).
     pub firmware_type: FirmwareType,
 }
 
 impl DeviceHandle {
+    /// Return the firmware type for a rescue handle, or `Unknown` for FIDO.
     pub fn firmware_type(&self) -> FirmwareType {
         match self {
             Self::Fido(_) => FirmwareType::Unknown,

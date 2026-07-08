@@ -1,3 +1,5 @@
+//! View model for the configuration screen — form state and save logic.
+
 use crate::ui::app::AppModels;
 use crate::ui::components::dialog::PinPromptContent;
 use crate::ui::components::{dialog, dialog::StatusContent};
@@ -9,6 +11,7 @@ use gpui_component::input::InputState;
 use gpui_component::select::{SelectItem, SelectState};
 use gpui_component::slider::SliderState;
 
+/// Known USB vendor/product identity presets for various security keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsbIdentityPreset {
     Custom,
@@ -120,6 +123,7 @@ impl UsbIdentityPreset {
     }
 }
 
+/// Supported LED driver types for the device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LedDriverType {
     PicoGpio = 1,
@@ -193,6 +197,7 @@ pub(super) enum StatusDialogHandle {
     Status(WeakEntity<StatusContent>),
 }
 
+/// Form state, input bindings, and save logic for the configuration screen.
 pub struct ConfigViewModel {
     pub(super) device: Entity<DeviceRepo>,
     pub(super) vendor_select: Entity<SelectState<Vec<VendorSelectOption>>>,

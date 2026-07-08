@@ -1,3 +1,11 @@
+//! RS-Key firmware implementation.
+//!
+//! RS-Key reports its SDK version (e.g. 5.7) via CTAP `GetInfo`, which
+//! does not directly map to the RS-Key release version. Because of this,
+//! capability gating uses static values and runtime probes rather than
+//! version checks. RS-Key supports both `legacy_fido_hardware_config`
+//! (via the `0x41` CONFIG_READ/CONFIG_WRITE path) and the rescue channel.
+
 use crate::hal::common::FirmwareVersion;
 use crate::hal::firmwares::FirmwareTrait;
 use crate::hal::types::FirmwareType;

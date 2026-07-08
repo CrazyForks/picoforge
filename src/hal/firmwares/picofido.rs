@@ -1,7 +1,20 @@
+//! pico-fido / pico-keys-sdk firmware implementation.
+//!
+//! The [`PicoFidoFirmware`] struct stores a parsed version and an optional
+//! legacy-vendor flag. The `supports_legacy_fido_hardware_config` method
+//! returns `true` when the firmware is ≤ 7.2 or when the legacy probe
+//! succeeded – gating the old `vendorPrototype` 0xFF command path.
+
 use crate::hal::common::FirmwareVersion;
 use crate::hal::firmwares::FirmwareTrait;
 use crate::hal::types::FirmwareType;
 
+/// Firmware implementation for pico-fido / pico-keys-sdk devices.
+///
+/// Version-gates the legacy vendor-prototype hardware config path:
+/// - Versions ≤ 7.2 (major < 7, or 7.x where x ≤ 2) support the legacy path.
+/// - Versions ≥ 7.3 require the rescue channel or the new-style config.
+/// - An explicit `has_legacy_vendor` probe result can override the version check.
 #[derive(Debug, Clone)]
 pub struct PicoFidoFirmware {
     version: FirmwareVersion,
@@ -11,6 +24,7 @@ pub struct PicoFidoFirmware {
 }
 
 impl PicoFidoFirmware {
+    /// Create a new pico-fido firmware state with no legacy vendor flag.
     pub fn new(version: FirmwareVersion) -> Self {
         Self {
             version,

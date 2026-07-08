@@ -1,18 +1,33 @@
+//! PC/SC (Smart Card) transport for the rescue channel.
+//!
+//! Communicates with the device via ISO 7816-4 APDUs over a PC/SC
+//! compatible smart-card reader. The device exposes a rescue applet
+//! identified by [`RESCUE_AID`] when in rescue/bootloader mode.
+
 use crate::error::PFError;
 use crate::hal::{rescue::constants::*, types::FirmwareType};
 use pcsc::{Context, Protocols, Scope, ShareMode};
 
+/// PC/SC transport wrapping a connected ISO 7816-4 smart card.
 pub struct PcscTransport {
+    /// The connected PC/SC card handle.
     pub card: pcsc::Card,
+    /// Firmware type determined during the SELECT AID exchange.
     pub firmware_type: FirmwareType,
+    /// Raw response bytes from the SELECT AID command.
     pub select_resp: Vec<u8>,
 }
 
 impl PcscTransport {
+    /// Open the rescue channel using the default Rescue AID.
     pub fn open() -> Result<Self, PFError> {
         Self::open_with_aid(RESCUE_AID)
     }
 
+    /// Open the rescue channel using a custom AID.
+    ///
+    /// Scans for the first connected reader, sends the SELECT AID APDU,
+    /// and determines the firmware type from the reader name or response data.
     pub fn open_with_aid(aid: &[u8]) -> Result<Self, PFError> {
         let ctx = Context::establish(Scope::User).map_err(|e| {
             log::error!("Failed to establish PCSC context: {}", e);

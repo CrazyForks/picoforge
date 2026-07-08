@@ -4,7 +4,7 @@
 //! fido/
 //! ├── mod.rs       — high-level FIDO2 operations (info, PIN, credentials, config)
 //! ├── constants.rs — CTAP2 command codes, CBOR map keys, COSE algorithms, bitflags
-//! └── hid.rs       — USB HID transport (CTAPHID framing, channel init, CBOR exchange)
+//! └── ops.rs       — FidoOperations trait impl (CTAPHID framing, PIN, credential mgmt)
 //! ```
 //!
 //! # Architecture
@@ -18,20 +18,20 @@
 //!  fido::read_device_details()     ← this file
 //!       │
 //!       ▼
-//!  HidTransport::open()            ← hid.rs
+//!  HidTransport::open()            ← transport/fido.rs
 //!       │
 //!       ▼
 //!  USB HID (CTAPHID protocol)
 //! ```
 //!
-//! [`constants`] is imported by both `mod.rs` and `hid.rs` and should be the
+//! [`constants`] is imported by both `mod.rs` and `ops.rs` and should be the
 //! single source of truth for every CTAP2-defined byte value. If you need to
 //! add a new command, sub-command, or CBOR key, put it there.
 //!
-//! [`hid`] owns the raw byte-level exchange: channel ID negotiation, packet
+//! [`ops`] implements the [`FidoOperations`] trait on [`HidTransport`],
+//! owning the raw byte-level exchange: channel ID negotiation, packet
 //! framing (init + continuation packets), PIN token acquisition, ECDH key
-//! agreement, and CBOR serialization. It exposes [`HidTransport`] which the
-//! rest of the module uses for all device I/O.
+//! agreement, and CBOR serialization.
 //!
 //! This module contains the public functions called from [`super::io`].
 //! Each function opens an [`HidTransport`], performs the CTAP2 operation,
@@ -41,14 +41,14 @@
 //!
 //! Pico-fido firmware exposes vendor-specific CTAP commands (`0xC1`, `0xC2`)
 //! for hardware configuration (VID/PID, LED, memory stats). These are handled
-//! through [`HidTransport::send_vendor_config`] and the
+//! through [`send_vendor_config`](ops::FidoOperations::send_vendor_config) and the
 //! [`VendorConfigCommand`] enum in constants. Legacy firmware (≤7.2) uses a
 //! different physical-options encoding; see `AnyFirmware::supports_legacy_fido_hardware_config`.
 //!
 //! # Adding a new FIDO2 operation
 //!
 //! 1. Add any new command/sub-command enums to [`constants`].
-//! 2. Implement the CBOR encoding and transport call in [`hid`] (if it
+//! 2. Implement the CBOR encoding and transport call in [`ops`] (if it
 //!    requires new framing or PIN token logic).
 //! 3. Add the high-level function in this file, following the pattern:
 //!    open transport → build CBOR payload → send → parse response → return.
@@ -622,6 +622,11 @@ pub(crate) fn read_rskey_management_info(
     }
 }
 
+/// Read full device status (info, config, security flags) over the FIDO HID transport.
+///
+/// Opens a CTAPHID channel, performs `GetInfo`, reads hardware config
+/// via vendor or standard config commands, and returns everything as
+/// a [`FullDeviceStatus`].
 pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
     log::info!("Starting FIDO device details read...");
 
@@ -1131,6 +1136,11 @@ fn write_rskey_config(
     )
 }
 
+/// Write device configuration over the FIDO HID transport.
+///
+/// Applies the partial [`AppConfigInput`] to the authenticator using
+/// the appropriate vendor or standard config command path for the
+/// detected firmware type. Requires the PIN for config write operations.
 pub fn write_config(config: AppConfigInput, pin: Option<String>) -> Result<String, PFError> {
     log::info!("Starting FIDO write_config...");
 

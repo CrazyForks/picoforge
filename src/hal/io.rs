@@ -1,8 +1,20 @@
+//! High-level device I/O dispatching across FIDO and Rescue protocols.
+//!
+//! Each public function here selects the appropriate protocol path based
+//! on the detected firmware type or an explicit [`DeviceMethod`] parameter.
+//! Some functions (e.g. `read_device_details`) try FIDO first and merge
+//! results from Rescue to produce a complete status snapshot.
+
 use crate::{
     error::PFError,
     hal::{fido, rescue, transport::DeviceHandle, types::*},
 };
 
+/// Read full device status by merging FIDO and Rescue data where available.
+///
+/// Tries the FIDO HID transport first, then falls back to the PC/SC
+/// rescue channel. When both succeed, fields from the more detailed
+/// source are used (e.g. serial/flash from Rescue, AAGUID from FIDO).
 pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
     let mut fido_status: Option<FullDeviceStatus> = None;
     let mut rescue_status: Option<FullDeviceStatus> = None;
@@ -113,15 +125,20 @@ pub fn read_device_details() -> Result<FullDeviceStatus, PFError> {
 }
 
 #[allow(dead_code)]
+/// Enable or lock secure boot on the device (Rescue-only operation).
 pub fn enable_secure_boot(lock: bool) -> Result<String, PFError> {
     rescue::enable_secure_boot(lock)
 }
 
 #[allow(dead_code)]
+/// Reboot the device (normal or BOOTSEL mode) via the Rescue channel.
 pub fn reboot(to_bootsel: bool) -> Result<String, PFError> {
     rescue::reboot_device(to_bootsel)
 }
 
+/// Write device configuration, selecting FIDO or Rescue path by method.
+///
+/// The FIDO path requires a PIN; the Rescue path does not.
 pub fn write_config(
     config: AppConfigInput,
     method: DeviceMethod,
@@ -134,6 +151,7 @@ pub fn write_config(
     }
 }
 
+/// Read the LED status configuration via the specified transport method.
 pub fn read_led_config(method: DeviceMethod) -> Result<LedStatusConfig, PFError> {
     match method {
         DeviceMethod::Fido => {
@@ -144,6 +162,7 @@ pub fn read_led_config(method: DeviceMethod) -> Result<LedStatusConfig, PFError>
     }
 }
 
+/// Write LED status configuration (all four status slots) via the specified transport.
 pub fn write_led_config(
     method: DeviceMethod,
     config: LedStatusConfig,
@@ -167,6 +186,7 @@ pub fn write_led_config(
     }
 }
 
+/// Read USB interface configuration from the Management applet.
 pub fn read_management_config(method: DeviceMethod) -> Result<ManagementAppConfig, PFError> {
     match method {
         DeviceMethod::Fido => {
@@ -181,6 +201,7 @@ pub fn read_management_config(method: DeviceMethod) -> Result<ManagementAppConfi
     }
 }
 
+/// Write the USB interface enable mask via the specified transport.
 pub fn write_management_config(
     method: DeviceMethod,
     enabled_mask: u16,
@@ -198,10 +219,12 @@ pub fn write_management_config(
     }
 }
 
+/// Retrieve the FIDO authenticator metadata (GetInfo) as [`FidoDeviceInfo`].
 pub(crate) fn get_fido_info() -> Result<FidoDeviceInfo, String> {
     fido::get_fido_info()
 }
 
+/// Change the FIDO PIN from `current_pin` to `new_pin`.
 pub(crate) fn change_fido_pin(
     current_pin: Option<String>,
     new_pin: String,
@@ -209,6 +232,7 @@ pub(crate) fn change_fido_pin(
     fido::change_fido_pin(current_pin, new_pin)
 }
 
+/// Set a new minimum PIN length on the authenticator.
 pub(crate) fn set_min_pin_length(
     current_pin: String,
     min_pin_length: u8,
@@ -216,26 +240,32 @@ pub(crate) fn set_min_pin_length(
     fido::set_min_pin_length(current_pin, min_pin_length)
 }
 
+/// Enumerate all credentials stored on the authenticator.
 pub fn get_credentials(pin: String) -> Result<Vec<StoredCredential>, String> {
     fido::get_credentials(pin)
 }
 
+/// Delete a credential from the authenticator by credential ID.
 pub fn delete_credential(pin: String, credential_id: String) -> Result<String, String> {
     fido::delete_credential(pin, credential_id)
 }
 
+/// Perform a factory reset on the authenticator.
 pub fn reset_device() -> Result<String, String> {
     fido::reset_device()
 }
 
+/// Enable enterprise attestation on the authenticator.
 pub fn enable_enterprise_attestation(pin: String) -> Result<String, String> {
     fido::enable_enterprise_attestation(pin)
 }
 
+/// Retrieve the enterprise attestation CSR from the authenticator.
 pub fn get_enterprise_attestation_csr() -> Result<String, String> {
     fido::get_enterprise_attestation_csr()
 }
 
+/// Upload an X.509 certificate for enterprise attestation.
 pub fn upload_enterprise_attestation_cert(
     pin: String,
     cert_path: String,

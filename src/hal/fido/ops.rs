@@ -1,4 +1,8 @@
-//! FIDO Operations
+//! Low-level FIDO2 operations implementing the CTAP2 PIN/UV auth protocol,
+//! credential management, and firmware-specific vendor commands.
+//!
+//! The [`FidoOperations`] trait is implemented on [`HidTransport`] and provides
+//! the building blocks used by the high-level functions in [`super`].
 
 use cbc::cipher::{Block, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit, block_padding::NoPadding};
 
@@ -10,7 +14,6 @@ use crate::error::PFError;
 use crate::hal::fido::constants::*;
 use crate::hal::transport::fido::{CTAPHID_CBOR, HidTransport};
 
-///
 /// Returned by [`HidTransport::credential_management_enumerate_rps`]. Each entry
 /// represents one RP stored on the authenticator.
 #[derive(Debug, Clone)]
@@ -35,43 +38,62 @@ pub struct EnumerateCredentialResponse {
     pub total_credentials: Option<usize>,
 }
 
+/// Low-level CTAP2 operations implemented on the FIDO HID transport.
+///
+/// Each method encodes the appropriate CBOR map, sends it via
+/// [`HidTransport::send_cbor`], and parses the response. PIN operations
+/// follow the ECDH + AES-256-CBC key-agreement flow defined in
+/// CTAP2 §11.5.4.
 pub trait FidoOperations {
+    /// Send a vendor-prototype config sub-command (pico-fido specific).
     fn send_vendor_config(
         &self,
         pin_token: &[u8],
         vendor_cmd: VendorConfigCommand,
         param: Value,
     ) -> Result<(), PFError>;
+    /// Retrieve the enterprise attestation CSR from the authenticator.
     fn get_enterprise_attestation_csr(&self) -> Result<Vec<u8>, PFError>;
+    /// Send an `authenticatorConfig` sub-command.
     fn send_config(
         &self,
         sub_cmd: ConfigSubCommand,
         pin_token: &[u8],
         sub_params: Option<Value>,
     ) -> Result<Vec<u8>, PFError>;
+    /// Enable enterprise attestation via config sub-command.
     fn send_config_enable_ea(&self, pin_token: &[u8]) -> Result<(), PFError>;
+    /// Set the minimum PIN length via config sub-command.
     fn send_config_set_min_pin_length(
         &self,
         pin_token: &[u8],
         new_min_pin_length: u8,
     ) -> Result<(), PFError>;
+    /// Retrieve the authenticator's ECDH P-256 public key for PIN token exchange.
     fn get_key_agreement(&self) -> Result<Value, PFError>;
+    /// Derive a PIN token from the user-supplied PIN.
     fn get_pin_token(&self, pin: &str) -> Result<Vec<u8>, PFError>;
+    /// Derive a PIN token scoped to specific permissions (e.g. credential management).
     fn get_pin_token_with_permission(
         &self,
         pin: &str,
         permissions: PinUvAuthTokenPermissions,
         rp_id: Option<String>,
     ) -> Result<Vec<u8>, PFError>;
+    /// Set a new PIN on the authenticator.
     fn set_pin(&self, new_pin: &str) -> Result<(), PFError>;
+    /// Change an existing PIN on the authenticator.
     fn change_pin(&self, current_pin: &str, new_pin: &str) -> Result<(), PFError>;
+    /// Compute a pinUvAuthToken signature for an `authenticatorConfig` sub-command.
     fn sign_config_command(
         &self,
         pin_token: &[u8],
         sub_cmd: u8,
         sub_params_bytes: &[u8],
     ) -> Vec<u8>;
+    /// Encode an ECDH public key as a COSE_Key map (used in PIN exchanges).
     fn encode_cose_key(&self, x: &[u8], y: &[u8]) -> Vec<u8>;
+    /// Build the CBOR map for a `clientPin` sub-command.
     fn encode_client_pin_params(
         &self,
         sub_cmd: ClientPinSubCommand,
@@ -80,23 +102,29 @@ pub trait FidoOperations {
         permissions: Option<u8>,
         rp_id: Option<String>,
     ) -> Vec<u8>;
+    /// Enumerate all relying parties stored on the authenticator.
     fn credential_management_enumerate_rps(
         &self,
         pin: &str,
     ) -> Result<Vec<EnumerateRpResponse>, PFError>;
+    /// Enumerate all credentials for a given relying party.
     fn credential_management_enumerate_credentials(
         &self,
         pin: &str,
         rp_id_hash: &[u8],
     ) -> Result<Vec<EnumerateCredentialResponse>, PFError>;
+    /// Delete a credential from the authenticator.
     fn credential_management_delete_credential(
         &self,
         pin: &str,
         credential_id_map: Value,
     ) -> Result<(), PFError>;
+    /// Read RS-Key configuration via the 0x41 CONFIG_READ vendor command.
     fn rs_key_config_read(&self, target: u8) -> Result<Vec<u8>, PFError>;
+    /// Write RS-Key configuration via the 0x41 CONFIG_WRITE vendor command.
     fn rs_key_config_write(&self, pin_token: &[u8], target: u8, blob: &[u8])
     -> Result<(), PFError>;
+    /// Compute a pinUvAuthToken signature for a credential management sub-command.
     fn sign_credential_mgmt_command(
         &self,
         pin_token: &[u8],

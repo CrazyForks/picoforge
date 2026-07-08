@@ -124,13 +124,13 @@
 //!
 //! # Module Structure
 //!
-//! [`constants`] defines all protocol constants shared between pico-fido and RS-Key:
+//! [`constants`](crate::hal::rescue::constants) defines all protocol constants shared between pico-fido and RS-Key:
 //! - ISO 7816-4 command bytes (CLA, INS, P1, P2, SW)
 //! - Rescue instruction codes and parameters
 //! - PHY configuration tags and bitflags
 //! - Vendor applet AIDs and instructions (LED, Management)
 //!
-//! This module contains the public functions called from [`super::io`]:
+//! This module contains the public functions called from [`io`](crate::hal::io):
 //! - `read_device_details()`: Reads full device status via Rescue
 //! - `write_config()`: Writes PHY configuration (VID/PID, LED, curves, etc.)
 //! - `reboot_device()`: Reboots device (normal or BOOTSEL mode)
@@ -164,12 +164,23 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use std::io::Cursor;
 
+/// APDU-level rescue operations implemented on the PC/SC transport.
+///
+/// Each method builds the appropriate ISO 7816-4 command APDU, transmits
+/// it via [`PcscTransport::transmit`], and parses the response. Multiple
+/// applets are available (Rescue, LED, Management) depending on firmware.
 pub trait RescueOperations {
+    /// Read full device status (info, config, security flags) via the Rescue applet.
     fn read_device_details(&self) -> Result<FullDeviceStatus, PFError>;
+    /// Write PHY configuration (VID/PID, LED, curves, etc.) via the Rescue applet.
     fn write_config(&self, config: AppConfigInput) -> Result<String, PFError>;
+    /// Reboot the device — either normally or into BOOTSEL (firmware-update) mode.
     fn reboot_device(&self, to_bootsel: bool) -> Result<String, PFError>;
+    /// Enable or lock secure boot on the device (WIP / firmware-specific).
     fn enable_secure_boot(&self, lock: bool) -> Result<String, PFError>;
+    /// Read LED status configuration from the vendor LED applet (RS-Key only).
     fn read_led_config(&self) -> Result<LedStatusConfig, PFError>;
+    /// Write a single LED status (color + brightness) via the LED applet (RS-Key only).
     fn write_led_status(
         &self,
         status: u8,
@@ -177,7 +188,9 @@ pub trait RescueOperations {
         brightness: u8,
         steady: bool,
     ) -> Result<String, PFError>;
+    /// Read USB interface configuration from the Management applet (RS-Key only).
     fn read_management_config(&self) -> Result<ManagementAppConfig, PFError>;
+    /// Write USB interface enable mask to the Management applet (RS-Key only).
     fn write_management_config(&self, enabled_mask: u16) -> Result<String, PFError>;
 }
 

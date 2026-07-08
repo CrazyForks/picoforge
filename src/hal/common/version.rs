@@ -1,6 +1,20 @@
+//! Firmware version parsing and comparison helpers.
+//!
+//! Firmware version strings follow a `major.minor[.patch]` format.
+//! Two-part versions (e.g. `7.6`) are common; three-part versions
+//! appear on newer firmware releases. The methods on [`FirmwareVersion`]
+//! are used throughout the HAL to gate feature enablement based on
+//! known firmware compatibility boundaries.
+
 #![allow(dead_code)]
 
 use std::fmt;
+
+/// Parsed firmware version supporting semantic comparison.
+///
+/// Each version is split on `.` — the first component becomes `major`,
+/// the second `minor`, and an optional third becomes `patch`. The raw
+/// string is preserved for display purposes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FirmwareVersion {
     pub major: u16,
@@ -10,6 +24,10 @@ pub struct FirmwareVersion {
 }
 
 impl FirmwareVersion {
+    /// Parse a version string in `major.minor` or `major.minor.patch` format.
+    ///
+    /// Returns `None` if the string has fewer than two components, or if
+    /// any component is not a valid unsigned integer.
     pub fn parse(version: &str) -> Option<Self> {
         let parts: Vec<&str> = version.split('.').collect();
         let major = parts.first()?.parse().ok()?;
@@ -23,10 +41,19 @@ impl FirmwareVersion {
         })
     }
 
+    /// Returns `true` when `self >= (major, minor)`.
+    ///
+    /// Only major and minor are compared; patch is ignored so that
+    /// two-part version strings (e.g. `7.2`) compare correctly with
+    /// three-part ones (e.g. `7.2.1`).
     pub fn is_at_least(&self, major: u16, minor: u16) -> bool {
         self.major > major || (self.major == major && self.minor >= minor)
     }
 
+    /// Returns `true` when `lo <= self <= hi`.
+    ///
+    /// The upper bound is inclusive. Calls [`is_at_least`](Self::is_at_least)
+    /// for the lower bound and performs a symmetric comparison for the upper.
     pub fn is_between(&self, lo_major: u16, lo_minor: u16, hi_major: u16, hi_minor: u16) -> bool {
         self.is_at_least(lo_major, lo_minor)
             && (self.major < hi_major || (self.major == hi_major && self.minor <= hi_minor))
