@@ -86,7 +86,7 @@ impl PasskeysViewModel {
         let theme = cx.theme();
 
         let fido_info = self.device.read(cx).fido_info.clone();
-        let ep_set = fido_info
+        let enterprise_attestation_set = fido_info
             .as_ref()
             .and_then(|f| f.options.get("ep").copied())
             .unwrap_or(false);
@@ -111,8 +111,8 @@ impl PasskeysViewModel {
                     .child(
                         h_flex().gap_2().child(
                             Switch::new("enable-ea-switch")
-                                .checked(ep_set)
-                                .disabled(ep_set)
+                                .checked(enterprise_attestation_set)
+                                .disabled(enterprise_attestation_set)
                                 .on_click(enable_ea_listener),
                         ),
                     ),

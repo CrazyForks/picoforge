@@ -627,20 +627,20 @@ impl Render for ConfigViewModel {
 
         // RS-Key supports full config read/write over FIDO via CONFIG_READ/CONFIG_WRITE.
         // Other firmwares (pico-fido) don't: product name, LED driver, curves, etc.
-        let fido_no_rskey = is_fido && !is_rskey;
+        let is_fido_no_rskey = is_fido && !is_rskey;
 
         let led_card = self
-            .render_led_card(cx, fido_no_rskey, hardware_config_disabled)
+            .render_led_card(cx, is_fido_no_rskey, hardware_config_disabled)
             .into_any_element();
         let options_card = self
             .render_options_card(cx, hardware_config_disabled)
             .into_any_element();
 
         let identity_card = self
-            .render_identity_card(cx.theme(), fido_no_rskey, hardware_config_disabled)
+            .render_identity_card(cx.theme(), is_fido_no_rskey, hardware_config_disabled)
             .into_any_element();
         let touch_card = self
-            .render_touch_card(cx.theme(), fido_no_rskey)
+            .render_touch_card(cx.theme(), is_fido_no_rskey)
             .into_any_element();
 
         let is_wide = window.bounds().size.width > px(1100.0);

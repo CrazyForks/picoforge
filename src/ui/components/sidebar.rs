@@ -124,8 +124,8 @@ impl Render for AppSidebar {
 
         // ── Header ────────────────────────────────────────────────────
         let header = {
-            let t = ((sidebar_width - px(48.)) / (px(255.) - px(48.))).clamp(0.0, 1.0);
-            let padding_left = px(8.) + (px(16.) - px(8.)) * t;
+            let padding_anim_t = ((sidebar_width - px(48.)) / (px(255.) - px(48.))).clamp(0.0, 1.0);
+            let padding_left = px(8.) + (px(16.) - px(8.)) * padding_anim_t;
 
             let width_icon_start = px(120.);
             let t_icon = ((sidebar_width - px(48.)) / (width_icon_start - px(48.))).clamp(0.0, 1.0);

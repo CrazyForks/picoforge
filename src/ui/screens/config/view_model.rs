@@ -441,7 +441,7 @@ impl ConfigViewModel {
         self.loading = true;
         cx.notify();
 
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
         let method_clone = method.clone();
 
         self._task = Some(cx.spawn(async move |_, cx| {
@@ -459,7 +459,7 @@ impl ConfigViewModel {
                 .await;
 
             if !device_still_matches {
-                let _ = entity.update(cx, |this, cx| {
+                let _ = weak_self.update(cx, |this, cx| {
                     this.loading = false;
                     this.device.update(cx, |repo, repo_cx| {
                         repo.refresh(repo_cx);
@@ -519,7 +519,7 @@ impl ConfigViewModel {
                 None
             };
 
-            let _ = entity.update(cx, |this, cx| {
+            let _ = weak_self.update(cx, |this, cx| {
                 this.loading = false;
 
                 match result {
@@ -667,11 +667,11 @@ impl ConfigViewModel {
 
         let mut final_led_gpio = current_led_gpio;
         let led_gpio_str = self.led_gpio_input.read(cx).text().to_string();
-        if let Ok(val) = led_gpio_str.parse::<u8>() {
-            if val != current_led_gpio {
+        if let Ok(parsed_gpio) = led_gpio_str.parse::<u8>() {
+            if parsed_gpio != current_led_gpio {
                 has_changes = true;
             }
-            final_led_gpio = val;
+            final_led_gpio = parsed_gpio;
         }
 
         let mut final_led_driver = current_led_driver;
@@ -679,12 +679,12 @@ impl ConfigViewModel {
         if let Some(idx) = driver_idx
             && let Some(driver) = LedDriverType::all().get(idx.row)
         {
-            let val = driver.value();
-            let current_val = current_led_driver.unwrap_or(1);
-            if val != current_val {
+            let driver_value = driver.value();
+            let current_driver_value = current_led_driver.unwrap_or(1);
+            if driver_value != current_driver_value {
                 has_changes = true;
             }
-            final_led_driver = Some(val);
+            final_led_driver = Some(driver_value);
         }
 
         let brightness = self.led_brightness_slider.read(cx).value().start() as u8;
@@ -825,19 +825,19 @@ impl ConfigViewModel {
         let device = self.device.read(cx);
         let config = device.status.as_ref().map(|s| &s.config);
 
-        let vid = config
+        let new_vid = config
             .map(|c| c.vid.clone())
             .unwrap_or_else(|| "CAFE".into());
-        let pid = config
+        let new_pid = config
             .map(|c| c.pid.clone())
             .unwrap_or_else(|| "4242".into());
-        let product = config
+        let new_product = config
             .map(|c| c.product_name.clone())
             .unwrap_or_else(|| "My Key".into());
-        let gpio = config
+        let new_gpio = config
             .map(|c| c.led_gpio.to_string())
             .unwrap_or_else(|| "25".into());
-        let timeout = config
+        let new_timeout = config
             .map(|c| c.touch_timeout.to_string())
             .unwrap_or_else(|| "10".into());
 
@@ -865,7 +865,7 @@ impl ConfigViewModel {
 
         self.enabled_usb_itf = config.and_then(|c| c.enabled_usb_itf);
 
-        let preset = UsbIdentityPreset::from_vid_pid(&vid, &pid);
+        let preset = UsbIdentityPreset::from_vid_pid(&new_vid, &new_pid);
         self.is_custom_vendor = preset == UsbIdentityPreset::Custom;
         let preset_idx = UsbIdentityPreset::all()
             .iter()
@@ -880,15 +880,15 @@ impl ConfigViewModel {
         });
 
         self.vid_input
-            .update(cx, |input, cx| input.set_value(vid, window, cx));
+            .update(cx, |input, cx| input.set_value(new_vid, window, cx));
         self.pid_input
-            .update(cx, |input, cx| input.set_value(pid, window, cx));
+            .update(cx, |input, cx| input.set_value(new_pid, window, cx));
         self.product_name_input
-            .update(cx, |input, cx| input.set_value(product, window, cx));
+            .update(cx, |input, cx| input.set_value(new_product, window, cx));
         self.led_gpio_input
-            .update(cx, |input, cx| input.set_value(gpio, window, cx));
+            .update(cx, |input, cx| input.set_value(new_gpio, window, cx));
         self.touch_timeout_input
-            .update(cx, |input, cx| input.set_value(timeout, window, cx));
+            .update(cx, |input, cx| input.set_value(new_timeout, window, cx));
         self.led_brightness_slider
             .update(cx, |slider, cx| slider.set_value(brightness, window, cx));
 
@@ -969,7 +969,7 @@ impl ConfigViewModel {
         self.loading = true;
         cx.notify();
 
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -985,7 +985,7 @@ impl ConfigViewModel {
                 None
             };
 
-            let _ = entity.update(cx, |this, cx| {
+            let _ = weak_self.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
                     Ok(_) => {
@@ -1089,7 +1089,7 @@ impl ConfigViewModel {
         self.loading = true;
         cx.notify();
 
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -1107,7 +1107,7 @@ impl ConfigViewModel {
                 None
             };
 
-            let _ = entity.update(cx, |this, cx| {
+            let _ = weak_self.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
                     Ok(_) => {

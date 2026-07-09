@@ -63,7 +63,7 @@ impl PasskeysViewModel {
         cx.notify();
 
         log::info!("Unlocking FIDO storage...");
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let pin_for_bg = pin.clone();
@@ -72,7 +72,7 @@ impl PasskeysViewModel {
                 .spawn(async move { DeviceRepo::get_credentials_blocking(pin_for_bg) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| {
+            let _ = weak_self.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
                     Ok(creds) => {
@@ -117,7 +117,7 @@ impl PasskeysViewModel {
         cx.notify();
 
         log::info!("Deleting credential...");
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -125,7 +125,7 @@ impl PasskeysViewModel {
                 .spawn(async move { DeviceRepo::delete_credential_blocking(pin, credential_id) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| match result {
+            let _ = weak_self.update(cx, |this, cx| match result {
                 Ok(_) => {
                     log::info!("Credential deleted successfully.");
                     let _ = dialog_handle.update(cx, |d, cx| {
@@ -146,14 +146,14 @@ impl PasskeysViewModel {
     }
 
     fn refresh_credentials(&mut self, pin: String, cx: &mut Context<Self>) {
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { DeviceRepo::get_credentials_blocking(pin) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| {
+            let _ = weak_self.update(cx, |this, cx| {
                 this.loading = false;
                 if let Ok(creds) = result {
                     this.credentials = creds;
@@ -272,7 +272,7 @@ impl PasskeysViewModel {
         cx.notify();
 
         log::info!("Setting up FIDO PIN...");
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -280,7 +280,7 @@ impl PasskeysViewModel {
                 .spawn(async move { DeviceRepo::change_fido_pin_blocking(None, new) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| match result {
+            let _ = weak_self.update(cx, |this, cx| match result {
                 Ok(msg) => {
                     log::info!("PIN configured: {}", msg);
                     let _ = dialog_handle.update(cx, |d, cx| {
@@ -387,7 +387,7 @@ impl PasskeysViewModel {
 
         window.open_dialog(cx, move |dialog, window, _| {
             let current = current_pin.clone();
-            let new = new_pin.clone();
+            let new_pin_value = new_pin.clone();
             let confirm = confirm_pin.clone();
             let slider_handle = slider.clone();
             let submit_for_ok = submit.clone();
@@ -415,7 +415,7 @@ impl PasskeysViewModel {
                              gpui_component::v_flex()
                                 .gap_2()
                                 .child(format!("New PIN (min {} chars)", current_min))
-                                .child(gpui_component::input::Input::new(&new))
+                                .child(gpui_component::input::Input::new(&new_pin_value))
                         )
                         .child("Confirm New PIN")
                         .child(gpui_component::input::Input::new(&confirm)),
@@ -425,7 +425,7 @@ impl PasskeysViewModel {
                     false
                 })
                 .footer(move |_, _window, _cx, _| {
-                    let s = submit_for_btn.clone();
+                    let submit_clone = submit_for_btn.clone();
                     vec![
                         gpui_component::button::Button::new("cancel")
                             .label("Cancel")
@@ -434,7 +434,7 @@ impl PasskeysViewModel {
                             .primary()
                             .label("Update")
                             .on_click(move |_, window, cx| {
-                                s(window, cx);
+                                submit_clone(window, cx);
                             }),
                     ]
                 })
@@ -455,7 +455,7 @@ impl PasskeysViewModel {
         cx.notify();
 
         log::info!("Changing FIDO PIN...");
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
         let new_for_sync = new.clone();
 
         self._task = Some(cx.spawn(async move |_, cx| {
@@ -464,7 +464,7 @@ impl PasskeysViewModel {
                 .spawn(async move { DeviceRepo::change_fido_pin_blocking(Some(current), new) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| match result {
+            let _ = weak_self.update(cx, |this, cx| match result {
                 Ok(msg) => {
                     log::info!("PIN changed: {}", msg);
                     let _ = dialog_handle.update(cx, |d, cx| {
@@ -498,7 +498,7 @@ impl PasskeysViewModel {
         self.loading = true;
         cx.notify();
         log::info!("Updating minimum PIN length to {}...", min_len);
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let current_for_bg = current.clone();
@@ -511,10 +511,10 @@ impl PasskeysViewModel {
 
             if let Err(e) = res_len {
                 log::error!("Failed to set minimum PIN length: {}", e);
-                let _ = entity.update(cx, |this, cx| {
+                let _ = weak_self.update(cx, |this, cx| {
                     this.loading = false;
-                    let _ = status_handle.update(cx, |s, cx| {
-                        s.set_error(format!("Failed to set length: {}", e), cx);
+                    let _ = status_handle.update(cx, |status_content, cx| {
+                        status_content.set_error(format!("Failed to set length: {}", e), cx);
                     });
                     cx.notify();
                 });
@@ -529,28 +529,31 @@ impl PasskeysViewModel {
                         async move { DeviceRepo::change_fido_pin_blocking(Some(current), new_pin) },
                     )
                     .await;
-                let _ = entity.update(cx, |this, cx| match res_pin {
+                let _ = weak_self.update(cx, |this, cx| match res_pin {
                     Ok(_) => {
                         log::info!("Minimum length and PIN updated successfully.");
-                        let _ = status_handle.update(cx, |s, cx| {
-                            s.set_success("Minimum length and PIN updated.".to_string(), cx);
+                        let _ = status_handle.update(cx, |status_content, cx| {
+                            status_content
+                                .set_success("Minimum length and PIN updated.".to_string(), cx);
                         });
                         this.sync_fido_state(Some(new_pin_for_sync), cx);
                     }
                     Err(e) => {
                         log::error!("Length set, but PIN change failed: {}", e);
                         this.loading = false;
-                        let _ = status_handle.update(cx, |s, cx| {
-                            s.set_error(format!("Length set, but PIN change failed: {}", e), cx);
+                        let _ = status_handle.update(cx, |status_content, cx| {
+                            status_content
+                                .set_error(format!("Length set, but PIN change failed: {}", e), cx);
                         });
                         cx.notify();
                     }
                 });
             } else {
-                let _ = entity.update(cx, |this, cx| {
+                let _ = weak_self.update(cx, |this, cx| {
                     log::info!("Minimum PIN length updated to {}.", min_len);
-                    let _ = status_handle.update(cx, |s, cx| {
-                        s.set_success(format!("Minimum length updated to {}.", min_len), cx);
+                    let _ = status_handle.update(cx, |status_content, cx| {
+                        status_content
+                            .set_success(format!("Minimum length updated to {}.", min_len), cx);
                     });
                     this.sync_fido_state(None, cx);
                 });
@@ -571,7 +574,7 @@ impl PasskeysViewModel {
         cx.notify();
 
         log::info!("Request Attestation CSR...");
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -579,15 +582,15 @@ impl PasskeysViewModel {
                 .spawn(async move { DeviceRepo::get_enterprise_attestation_csr_blocking() })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| {
+            let _ = weak_self.update(cx, |this, cx| {
                 this.loading = false;
                 this.csr_loading = false;
                 match result {
                     Ok(pem) => {
                         log::info!("CSR retrieved successfully ({} bytes).", pem.len());
                         this.csr_pem = Some(pem);
-                        let _ = status_handle.update(cx, |s, cx| {
-                            s.set_success(
+                        let _ = status_handle.update(cx, |status_content, cx| {
+                            status_content.set_success(
                                 "CSR retrieved from device. Click \"View CSR\" to inspect or save it.".to_string(),
                                 cx,
                             );
@@ -595,8 +598,8 @@ impl PasskeysViewModel {
                     }
                     Err(e) => {
                         log::error!("Failed to retrieve CSR: {}", e);
-                        let _ = status_handle.update(cx, |s, cx| {
-                            s.set_error(format!("Failed to retrieve CSR: {}", e), cx);
+                        let _ = status_handle.update(cx, |status_content, cx| {
+                            status_content.set_error(format!("Failed to retrieve CSR: {}", e), cx);
                         });
                     }
                 }
@@ -622,7 +625,7 @@ impl PasskeysViewModel {
             "Uploading enterprise attestation certificate from: {}",
             cert_path
         );
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -632,7 +635,7 @@ impl PasskeysViewModel {
                 })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| {
+            let _ = weak_self.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
                     Ok(msg) => {
@@ -684,7 +687,7 @@ impl PasskeysViewModel {
         cx.notify();
 
         log::info!("Enabling enterprise attestation...");
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         self._task = Some(cx.spawn(async move |_, cx| {
             let result = cx
@@ -692,7 +695,7 @@ impl PasskeysViewModel {
                 .spawn(async move { DeviceRepo::enable_enterprise_attestation_blocking(pin) })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| match result {
+            let _ = weak_self.update(cx, |this, cx| match result {
                 Ok(msg) => {
                     log::info!("{}", msg);
                     let _ = dialog_handle.update(cx, |d, cx| {
@@ -714,7 +717,7 @@ impl PasskeysViewModel {
 
     pub(super) fn open_upload_cert_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let window_handle = window.window_handle();
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
@@ -741,7 +744,7 @@ impl PasskeysViewModel {
                     window,
                     cx,
                     move |pin, dialog_handle, cx| {
-                        let _ = entity.update(cx, |this, cx| {
+                        let _ = weak_self.update(cx, |this, cx| {
                             this.execute_upload_cert(pin, cert_path.clone(), dialog_handle, cx);
                         });
                     },
@@ -776,7 +779,7 @@ impl PasskeysViewModel {
         self.loading = true;
 
         let status_handle = dialog::open_status_dialog("Resetting Device...", window, cx);
-        let entity = cx.entity().downgrade();
+        let weak_self = cx.entity().downgrade();
 
         let _ = status_handle.update(cx, |d, cx| {
             d.set_loading(
@@ -808,7 +811,7 @@ impl PasskeysViewModel {
                 .await;
 
             if !reconnected {
-                let _ = entity.update(cx, |this, cx| {
+                let _ = weak_self.update(cx, |this, cx| {
                     this.loading = false;
                     let _ = status_handle.update(cx, |d, cx| {
                         d.set_error(
@@ -830,7 +833,7 @@ impl PasskeysViewModel {
                 .spawn(async move { DeviceRepo::reset_device_blocking() })
                 .await;
 
-            let _ = entity.update(cx, |this, cx| match result {
+            let _ = weak_self.update(cx, |this, cx| match result {
                 Ok(msg) => {
                     log::info!("Device Reset: {}", msg);
                     this.lock_storage(cx);

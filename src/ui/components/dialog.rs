@@ -549,27 +549,27 @@ impl ChangePinContent {
             return;
         }
 
-        let current_val = self.current_pin.read(cx).text().to_string();
-        let new_val = self.new_pin.read(cx).text().to_string();
-        let confirm_val = self.confirm_pin.read(cx).text().to_string();
+        let current_pin_text = self.current_pin.read(cx).text().to_string();
+        let new_pin_text = self.new_pin.read(cx).text().to_string();
+        let confirm_pin_text = self.confirm_pin.read(cx).text().to_string();
 
-        if current_val.is_empty() {
+        if current_pin_text.is_empty() {
             return;
         }
 
-        if new_val != confirm_val {
+        if new_pin_text != confirm_pin_text {
             self.set_error("PINs do not match".to_string(), cx);
             return;
         }
 
-        if new_val.len() < 4 {
+        if new_pin_text.len() < 4 {
             self.set_error("PIN must be at least 4 characters".to_string(), cx);
             return;
         }
 
         let handle = cx.entity().downgrade();
         self.set_loading(cx);
-        (self.on_confirm)(current_val, new_val, handle, cx);
+        (self.on_confirm)(current_pin_text, new_pin_text, handle, cx);
     }
 }
 
@@ -632,9 +632,9 @@ impl Render for ChangePinContent {
                 .into_any_element(),
 
             DialogPhase::Error(err_msg) => {
-                let current = self.current_pin.clone();
-                let new = self.new_pin.clone();
-                let confirm = self.confirm_pin.clone();
+                let current_pin_entity = self.current_pin.clone();
+                let new_pin_entity = self.new_pin.clone();
+                let confirm_pin_entity = self.confirm_pin.clone();
                 let on_confirm = self.on_confirm.clone();
                 let handle = cx.entity().downgrade();
 
@@ -655,11 +655,11 @@ impl Render for ChangePinContent {
                         v_flex()
                             .gap_4()
                             .child("Current PIN")
-                            .child(Input::new(&current))
+                            .child(Input::new(&current_pin_entity))
                             .child("New PIN")
-                            .child(Input::new(&new))
+                            .child(Input::new(&new_pin_entity))
                             .child("Confirm New PIN")
-                            .child(Input::new(&confirm)),
+                            .child(Input::new(&confirm_pin_entity)),
                     )
                     .child(
                         h_flex()
@@ -672,15 +672,17 @@ impl Render for ChangePinContent {
                             )
                             .child(Button::new("confirm").primary().label("Confirm").on_click(
                                 move |_, _, cx| {
-                                    let current_val = current.read(cx).text().to_string();
-                                    let new_val = new.read(cx).text().to_string();
-                                    let confirm_val = confirm.read(cx).text().to_string();
+                                    let current_pin_text =
+                                        current_pin_entity.read(cx).text().to_string();
+                                    let new_pin_text = new_pin_entity.read(cx).text().to_string();
+                                    let confirm_pin_text =
+                                        confirm_pin_entity.read(cx).text().to_string();
 
-                                    if current_val.is_empty() {
+                                    if current_pin_text.is_empty() {
                                         return;
                                     }
 
-                                    if new_val != confirm_val {
+                                    if new_pin_text != confirm_pin_text {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error("PINs do not match".to_string(), cx);
@@ -689,7 +691,7 @@ impl Render for ChangePinContent {
                                         return;
                                     }
 
-                                    if new_val.len() < 4 {
+                                    if new_pin_text.len() < 4 {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error(
@@ -704,7 +706,7 @@ impl Render for ChangePinContent {
                                     if let Some(h) = handle.upgrade() {
                                         h.update(cx, |this, cx| this.set_loading(cx));
                                     }
-                                    on_confirm(current_val, new_val, handle.clone(), cx);
+                                    on_confirm(current_pin_text, new_pin_text, handle.clone(), cx);
                                 },
                             )),
                     )
@@ -712,9 +714,9 @@ impl Render for ChangePinContent {
             }
 
             DialogPhase::Input => {
-                let current = self.current_pin.clone();
-                let new = self.new_pin.clone();
-                let confirm = self.confirm_pin.clone();
+                let current_pin_entity = self.current_pin.clone();
+                let new_pin_entity = self.new_pin.clone();
+                let confirm_pin_entity = self.confirm_pin.clone();
                 let on_confirm = self.on_confirm.clone();
                 let handle = cx.entity().downgrade();
 
@@ -725,11 +727,11 @@ impl Render for ChangePinContent {
                         v_flex()
                             .gap_4()
                             .child("Current PIN")
-                            .child(Input::new(&current))
+                            .child(Input::new(&current_pin_entity))
                             .child("New PIN")
-                            .child(Input::new(&new))
+                            .child(Input::new(&new_pin_entity))
                             .child("Confirm New PIN")
-                            .child(Input::new(&confirm)),
+                            .child(Input::new(&confirm_pin_entity)),
                     )
                     .child(
                         h_flex()
@@ -742,15 +744,17 @@ impl Render for ChangePinContent {
                             )
                             .child(Button::new("confirm").primary().label("Confirm").on_click(
                                 move |_, _, cx| {
-                                    let current_val = current.read(cx).text().to_string();
-                                    let new_val = new.read(cx).text().to_string();
-                                    let confirm_val = confirm.read(cx).text().to_string();
+                                    let current_pin_text =
+                                        current_pin_entity.read(cx).text().to_string();
+                                    let new_pin_text = new_pin_entity.read(cx).text().to_string();
+                                    let confirm_pin_text =
+                                        confirm_pin_entity.read(cx).text().to_string();
 
-                                    if current_val.is_empty() {
+                                    if current_pin_text.is_empty() {
                                         return;
                                     }
 
-                                    if new_val != confirm_val {
+                                    if new_pin_text != confirm_pin_text {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error("PINs do not match".to_string(), cx);
@@ -759,7 +763,7 @@ impl Render for ChangePinContent {
                                         return;
                                     }
 
-                                    if new_val.len() < 4 {
+                                    if new_pin_text.len() < 4 {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error(
@@ -774,7 +778,7 @@ impl Render for ChangePinContent {
                                     if let Some(h) = handle.upgrade() {
                                         h.update(cx, |this, cx| this.set_loading(cx));
                                     }
-                                    on_confirm(current_val, new_val, handle.clone(), cx);
+                                    on_confirm(current_pin_text, new_pin_text, handle.clone(), cx);
                                 },
                             )),
                     )
@@ -869,22 +873,22 @@ impl SetPinContent {
             return;
         }
 
-        let new_val = self.new_pin.read(cx).text().to_string();
-        let confirm_val = self.confirm_pin.read(cx).text().to_string();
+        let new_pin_text = self.new_pin.read(cx).text().to_string();
+        let confirm_pin_text = self.confirm_pin.read(cx).text().to_string();
 
-        if new_val != confirm_val {
+        if new_pin_text != confirm_pin_text {
             self.set_error("PINs do not match".to_string(), cx);
             return;
         }
 
-        if new_val.len() < 4 {
+        if new_pin_text.len() < 4 {
             self.set_error("PIN must be at least 4 characters".to_string(), cx);
             return;
         }
 
         let handle = cx.entity().downgrade();
         self.set_loading(cx);
-        (self.on_confirm)(new_val, handle, cx);
+        (self.on_confirm)(new_pin_text, handle, cx);
     }
 }
 
@@ -945,8 +949,8 @@ impl Render for SetPinContent {
                 .into_any_element(),
 
             DialogPhase::Error(err_msg) => {
-                let new = self.new_pin.clone();
-                let confirm = self.confirm_pin.clone();
+                let new_pin_entity = self.new_pin.clone();
+                let confirm_pin_entity = self.confirm_pin.clone();
                 let on_confirm = self.on_confirm.clone();
                 let handle = cx.entity().downgrade();
 
@@ -967,9 +971,9 @@ impl Render for SetPinContent {
                         v_flex()
                             .gap_4()
                             .child("New PIN")
-                            .child(Input::new(&new))
+                            .child(Input::new(&new_pin_entity))
                             .child("Confirm New PIN")
-                            .child(Input::new(&confirm)),
+                            .child(Input::new(&confirm_pin_entity)),
                     )
                     .child(
                         h_flex()
@@ -982,10 +986,11 @@ impl Render for SetPinContent {
                             )
                             .child(Button::new("confirm").primary().label("Confirm").on_click(
                                 move |_, _, cx| {
-                                    let new_val = new.read(cx).text().to_string();
-                                    let confirm_val = confirm.read(cx).text().to_string();
+                                    let new_pin_text = new_pin_entity.read(cx).text().to_string();
+                                    let confirm_pin_text =
+                                        confirm_pin_entity.read(cx).text().to_string();
 
-                                    if new_val != confirm_val {
+                                    if new_pin_text != confirm_pin_text {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error("PINs do not match".to_string(), cx);
@@ -994,7 +999,7 @@ impl Render for SetPinContent {
                                         return;
                                     }
 
-                                    if new_val.len() < 4 {
+                                    if new_pin_text.len() < 4 {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error(
@@ -1009,7 +1014,7 @@ impl Render for SetPinContent {
                                     if let Some(h) = handle.upgrade() {
                                         h.update(cx, |this, cx| this.set_loading(cx));
                                     }
-                                    on_confirm(new_val, handle.clone(), cx);
+                                    on_confirm(new_pin_text, handle.clone(), cx);
                                 },
                             )),
                     )
@@ -1017,8 +1022,8 @@ impl Render for SetPinContent {
             }
 
             DialogPhase::Input => {
-                let new = self.new_pin.clone();
-                let confirm = self.confirm_pin.clone();
+                let new_pin_entity = self.new_pin.clone();
+                let confirm_pin_entity = self.confirm_pin.clone();
                 let on_confirm = self.on_confirm.clone();
                 let handle = cx.entity().downgrade();
 
@@ -1029,9 +1034,9 @@ impl Render for SetPinContent {
                         v_flex()
                             .gap_4()
                             .child("New PIN")
-                            .child(Input::new(&new))
+                            .child(Input::new(&new_pin_entity))
                             .child("Confirm New PIN")
-                            .child(Input::new(&confirm)),
+                            .child(Input::new(&confirm_pin_entity)),
                     )
                     .child(
                         h_flex()
@@ -1044,10 +1049,11 @@ impl Render for SetPinContent {
                             )
                             .child(Button::new("confirm").primary().label("Confirm").on_click(
                                 move |_, _, cx| {
-                                    let new_val = new.read(cx).text().to_string();
-                                    let confirm_val = confirm.read(cx).text().to_string();
+                                    let new_pin_text = new_pin_entity.read(cx).text().to_string();
+                                    let confirm_pin_text =
+                                        confirm_pin_entity.read(cx).text().to_string();
 
-                                    if new_val != confirm_val {
+                                    if new_pin_text != confirm_pin_text {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error("PINs do not match".to_string(), cx);
@@ -1056,7 +1062,7 @@ impl Render for SetPinContent {
                                         return;
                                     }
 
-                                    if new_val.len() < 4 {
+                                    if new_pin_text.len() < 4 {
                                         if let Some(h) = handle.upgrade() {
                                             h.update(cx, |this, cx| {
                                                 this.set_error(
@@ -1071,7 +1077,7 @@ impl Render for SetPinContent {
                                     if let Some(h) = handle.upgrade() {
                                         h.update(cx, |this, cx| this.set_loading(cx));
                                     }
-                                    on_confirm(new_val, handle.clone(), cx);
+                                    on_confirm(new_pin_text, handle.clone(), cx);
                                 },
                             )),
                     )

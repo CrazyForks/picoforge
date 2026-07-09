@@ -180,8 +180,14 @@ impl HomeViewModel {
                                     .child("Resident Keys"),
                             )
                             .child({
-                                let rk = fido.options.get("rk").copied().unwrap_or(false);
-                                Tag::new(if rk { "Supported" } else { "Not Supported" }).active(rk)
+                                let resident_keys_supported =
+                                    fido.options.get("rk").copied().unwrap_or(false);
+                                Tag::new(if resident_keys_supported {
+                                    "Supported"
+                                } else {
+                                    "Not Supported"
+                                })
+                                .active(resident_keys_supported)
                             }),
                     )
                     .child(
@@ -210,8 +216,14 @@ impl HomeViewModel {
                                     .child("Enterprise attestation"),
                             )
                             .child(div().font_medium().text_color(theme.foreground).child({
-                                let ep_set = fido.options.get("ep").copied().unwrap_or(false);
-                                Tag::new(if ep_set { "Set" } else { "Not Set" }).active(ep_set)
+                                let enterprise_attestation_set =
+                                    fido.options.get("ep").copied().unwrap_or(false);
+                                Tag::new(if enterprise_attestation_set {
+                                    "Set"
+                                } else {
+                                    "Not Set"
+                                })
+                                .active(enterprise_attestation_set)
                             })),
                     )
                     .when(fido.remaining_discoverable_credentials.is_some(), |this| {
