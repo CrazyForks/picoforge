@@ -326,8 +326,8 @@ impl PhyTag {
     ///
     /// Returns `None` if the value doesn't match any known tag.
     /// Used when parsing device responses that contain raw tag bytes.
-    pub fn from_u8(val: u8) -> Option<Self> {
-        match val {
+    pub fn from_u8(tag_value: u8) -> Option<Self> {
+        match tag_value {
             0x00 => Some(Self::VidPid),
             0x04 => Some(Self::LedGpio),
             0x05 => Some(Self::LedBrightness),
@@ -538,8 +538,8 @@ impl LedColor {
     /// Convert a raw u8 value to a LedColor enum variant.
     ///
     /// Returns `None` if the value doesn't match any known color.
-    pub fn from_u8(val: u8) -> Option<Self> {
-        match val {
+    pub fn from_u8(color_value: u8) -> Option<Self> {
+        match color_value {
             0 => Some(Self::Off),
             1 => Some(Self::Red),
             2 => Some(Self::Green),

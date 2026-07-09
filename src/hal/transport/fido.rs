@@ -225,12 +225,15 @@ impl HidTransport {
     fn init_channel(device: &hidapi::HidDevice) -> Result<u32, PFError> {
         log::debug!("Initializing CTAPHID channel...");
 
-        let mut drain_buf = [0u8; HID_REPORT_SIZE];
-        while let Ok(n) = device.read_timeout(&mut drain_buf[..], HID_READ_TIMEOUT_MS) {
+        let mut stale_packet_buffer = [0u8; HID_REPORT_SIZE];
+        while let Ok(n) = device.read_timeout(&mut stale_packet_buffer[..], HID_READ_TIMEOUT_MS) {
             if n == 0 {
                 break;
             }
-            log::trace!("Drained stale HID packet: {:02X?}", &drain_buf[0..16]);
+            log::trace!(
+                "Drained stale HID packet: {:02X?}",
+                &stale_packet_buffer[0..16]
+            );
         }
 
         let mut nonce = [0u8; 8];
@@ -253,24 +256,29 @@ impl HidTransport {
         // Read Response until we find our nonce
         let start = std::time::Instant::now();
         while start.elapsed() < Duration::from_secs(1) {
-            let mut buf = [0u8; HID_REPORT_SIZE];
+            let mut init_buf = [0u8; HID_REPORT_SIZE];
             if device
-                .read_timeout(&mut buf[..], HID_INIT_READ_TIMEOUT_MS)
+                .read_timeout(&mut init_buf[..], HID_INIT_READ_TIMEOUT_MS)
                 .is_ok()
             {
                 // Check if response matches our broadcast and nonce
-                if buf[0..4] == CTAPHID_CID_BROADCAST.to_be_bytes()
-                    && buf[4] == CTAPHID_INIT
-                    && buf[7..15] == nonce
+                if init_buf[0..4] == CTAPHID_CID_BROADCAST.to_be_bytes()
+                    && init_buf[4] == CTAPHID_INIT
+                    && init_buf[7..15] == nonce
                 {
                     // New CID is at bytes 16..20
-                    let new_cid = u32::from_be_bytes([buf[15], buf[16], buf[17], buf[18]]);
+                    let new_cid = u32::from_be_bytes([
+                        init_buf[15],
+                        init_buf[16],
+                        init_buf[17],
+                        init_buf[18],
+                    ]);
                     log::debug!("Channel negotiation successful. New CID: 0x{:08X}", new_cid);
                     return Ok(new_cid);
                 } else {
                     log::trace!(
                         "Received ignoreable HID packet during CID negotiation: {:02X?}",
-                        &buf[0..16]
+                        &init_buf[0..16]
                     );
                 }
             }
@@ -408,12 +416,15 @@ impl HidTransport {
             log::error!("Device sent empty payload response.");
             return Err(PFError::Device("Empty response".into()));
         }
-        let status = response_data[0];
-        if status != 0x00 {
-            log::error!("FIDO Operation returned failure status: 0x{:02X}", status);
+        let ctap_status_byte = response_data[0];
+        if ctap_status_byte != 0x00 {
+            log::error!(
+                "FIDO Operation returned failure status: 0x{:02X}",
+                ctap_status_byte
+            );
             return Err(PFError::Device(format!(
                 "FIDO Operation Failed with Status: 0x{:02X}",
-                status
+                ctap_status_byte
             )));
         }
 
@@ -436,18 +447,18 @@ impl HidTransport {
     fn read_hid_response(&self, cmd: u8, timeout_ms: i32) -> Result<Vec<u8>, PFError> {
         log::debug!("Waiting for response...");
 
-        let mut buf = [0u8; HID_REPORT_SIZE];
+        let mut packet_buf = [0u8; HID_REPORT_SIZE];
         let mut response_data = Vec::new();
         let expected_len: usize;
         let mut read_len = 0;
         let mut last_seq = 0;
 
-        let start_time = std::time::Instant::now();
+        let deadline_start = std::time::Instant::now();
         let timeout_duration = std::time::Duration::from_millis(timeout_ms as u64);
 
-        // 1. Read First Packet (Loop to handle Keepalives)
+        // 1. Read First Packet (Keepalive Loop)
         loop {
-            if start_time.elapsed() > timeout_duration {
+            if deadline_start.elapsed() > timeout_duration {
                 log::error!("Timeout waiting for device response (Keepalive limit exceeded)");
                 return Err(PFError::Device(
                     "Timeout waiting for device response (Keepalive limit exceeded)".into(),
@@ -456,7 +467,7 @@ impl HidTransport {
 
             if let Err(e) = self
                 .device
-                .read_timeout(&mut buf[..], HID_RESP_READ_TIMEOUT_MS)
+                .read_timeout(&mut packet_buf[..], HID_RESP_READ_TIMEOUT_MS)
             {
                 log::error!("Timeout reading response packet: {}", e);
                 return Err(PFError::Io(format!(
@@ -466,50 +477,52 @@ impl HidTransport {
             }
 
             // Check CID mismatch
-            if u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) != self.cid {
+            if u32::from_be_bytes([packet_buf[0], packet_buf[1], packet_buf[2], packet_buf[3]])
+                != self.cid
+            {
                 log::warn!("Received packet from different CID, ignoring...");
                 continue;
             }
 
             // Check for KEEPALIVE (0xBB)
-            if buf[4] == CTAPHID_KEEPALIVE {
-                let status = buf[5]; // Keepalive status byte
+            if packet_buf[4] == CTAPHID_KEEPALIVE {
+                let keepalive_status = packet_buf[5];
                 log::debug!(
                     "Device sent KEEPALIVE (Status: 0x{:02X}), waiting...",
-                    status
+                    keepalive_status
                 );
-                continue; // Go back to start of loop and read again
+                continue;
             }
 
             // If we are here, it's a real response
             break;
         }
 
-        if buf[4] == CTAPHID_ERROR {
-            log::error!("Device returned CTAP Error code: 0x{:02X}", buf[5]);
+        if packet_buf[4] == CTAPHID_ERROR {
+            log::error!("Device returned CTAP Error code: 0x{:02X}", packet_buf[5]);
             return Err(PFError::Device(format!(
                 "Device returned CTAP Error: 0x{:02X}",
-                buf[5],
+                packet_buf[5],
             )));
         } else {
             log::trace!("Packet received is not a CTAP Error");
         }
 
-        if buf[4] == cmd {
-            expected_len = u16::from_be_bytes([buf[5], buf[6]]) as usize;
+        if packet_buf[4] == cmd {
+            expected_len = u16::from_be_bytes([packet_buf[5], packet_buf[6]]) as usize;
             let in_pkt = std::cmp::min(expected_len, HID_REPORT_SIZE - 7);
-            response_data.extend_from_slice(&buf[7..7 + in_pkt]);
+            response_data.extend_from_slice(&packet_buf[7..7 + in_pkt]);
             read_len += in_pkt;
             // log::trace!("Received Init Response. Expecting {} bytes total.", expected_len);
         } else {
             log::error!(
                 "Unexpected command response: 0x{:02X} (Expected 0x{:02X})",
-                buf[4],
+                packet_buf[4],
                 cmd
             );
             return Err(PFError::Device(format!(
                 "Unexpected command response: 0x{:02X} (Expected 0x{:02X})",
-                buf[4], cmd
+                packet_buf[4], cmd
             )));
         }
 
@@ -517,7 +530,7 @@ impl HidTransport {
         while read_len < expected_len {
             if let Err(e) = self
                 .device
-                .read_timeout(&mut buf[..], HID_CONT_READ_TIMEOUT_MS)
+                .read_timeout(&mut packet_buf[..], HID_CONT_READ_TIMEOUT_MS)
             {
                 log::error!("Timeout reading continuation packet: {}", e);
                 return Err(PFError::Io(format!(
@@ -526,11 +539,13 @@ impl HidTransport {
                 )));
             }
 
-            if u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) != self.cid {
+            if u32::from_be_bytes([packet_buf[0], packet_buf[1], packet_buf[2], packet_buf[3]])
+                != self.cid
+            {
                 continue; // Ignore packets from other channels
             }
 
-            let seq = buf[4];
+            let seq = packet_buf[4];
             if seq != last_seq {
                 log::error!(
                     "Sequence mismatch in response. Expected {}, got {}",
@@ -542,7 +557,7 @@ impl HidTransport {
             last_seq += 1;
 
             let in_pkt = std::cmp::min(expected_len - read_len, HID_REPORT_SIZE - 5);
-            response_data.extend_from_slice(&buf[5..5 + in_pkt]);
+            response_data.extend_from_slice(&packet_buf[5..5 + in_pkt]);
             read_len += in_pkt;
         }
 

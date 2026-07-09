@@ -106,18 +106,31 @@ pub(crate) fn get_fido_info() -> Result<FidoDeviceInfo, String> {
         HidTransport::open().map_err(|e| format!("Could not open HID transport: {}", e))?;
 
     let info_payload = [CtapCommand::GetInfo as u8];
-    let info_res = transport
+    let info_response = transport
         .send_cbor(CTAPHID_CBOR, &info_payload)
         .map_err(|e| format!("GetInfo CTAP command failed: {}", e))?;
 
-    let info_val: Value =
-        from_slice(&info_res).map_err(|e| format!("Failed to parse GetInfo CBOR: {}", e))?;
+    let info_value: Value =
+        from_slice(&info_response).map_err(|e| format!("Failed to parse GetInfo CBOR: {}", e))?;
 
-    parse_fido_get_info(&info_val)
+    parse_fido_get_info(&info_value)
 }
 
-fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
-    let map = match info_val {
+fn format_firmware_version(raw: i128) -> String {
+    if raw > 0xFFFF {
+        format!(
+            "{}.{}.{}",
+            (raw >> 16) & 0xFF,
+            (raw >> 8) & 0xFF,
+            raw & 0xFF
+        )
+    } else {
+        format!("{}.{}", (raw >> 8) & 0xFF, raw & 0xFF)
+    }
+}
+
+fn parse_fido_get_info(info_value: &Value) -> Result<FidoDeviceInfo, String> {
+    let map = match info_value {
         Value::Map(m) => m,
         _ => return Err("GetInfo response is not a CBOR map".into()),
     };
@@ -150,9 +163,9 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             // 0x01: versions (array of strings)
             0x01 => {
                 if let Value::Array(arr) = val {
-                    for v in arr {
-                        if let Value::Text(s) = v {
-                            versions.push(s.clone());
+                    for entry in arr {
+                        if let Value::Text(version_str) = entry {
+                            versions.push(version_str.clone());
                         }
                     }
                     log::info!("Device versions (0x01): {:?}", versions);
@@ -161,9 +174,9 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             // 0x02: extensions (array of strings)
             0x02 => {
                 if let Value::Array(arr) = val {
-                    for v in arr {
-                        if let Value::Text(s) = v {
-                            extensions.push(s.clone());
+                    for entry in arr {
+                        if let Value::Text(ext_str) = entry {
+                            extensions.push(ext_str.clone());
                         }
                     }
                     log::info!("Device extensions (0x02): {:?}", extensions);
@@ -171,16 +184,18 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x03: aaguid (byte string)
             0x03 => {
-                if let Value::Bytes(b) = val {
-                    aaguid = hex::encode_upper(b);
+                if let Value::Bytes(g) = val {
+                    aaguid = hex::encode_upper(g);
                     log::info!("Device aaguid (0x03): {}", aaguid);
                 }
             }
             // 0x04: options (map of string -> bool)
             0x04 => {
                 if let Value::Map(opts_map) = val {
-                    for (k, v) in opts_map {
-                        if let (Value::Text(name), Value::Bool(enabled)) = (k, v) {
+                    for (option_key, option_value) in opts_map {
+                        if let (Value::Text(name), Value::Bool(enabled)) =
+                            (option_key, option_value)
+                        {
                             options.insert(name.clone(), *enabled);
                         }
                     }
@@ -189,17 +204,17 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x05: maxMsgSize
             0x05 => {
-                if let Value::Integer(n) = val {
-                    max_msg_size = *n;
+                if let Value::Integer(raw_size) = val {
+                    max_msg_size = *raw_size;
                     log::info!("Device maxMsgSize (0x05): {}", max_msg_size);
                 }
             }
             // 0x06: pinUvAuthProtocols (array of unsigned)
             0x06 => {
                 if let Value::Array(arr) = val {
-                    for v in arr {
-                        if let Value::Integer(n) = v {
-                            pin_protocols.push(*n as u32);
+                    for entry in arr {
+                        if let Value::Integer(protocol) = entry {
+                            pin_protocols.push(*protocol as u32);
                         }
                     }
                     log::info!("Device pinUvAuthProtocols (0x06): {:?}", pin_protocols);
@@ -207,8 +222,8 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x07: maxCredentialCountInList
             0x07 => {
-                if let Value::Integer(n) = val {
-                    max_credential_count_in_list = Some(*n);
+                if let Value::Integer(count) = val {
+                    max_credential_count_in_list = Some(*count);
                     log::info!(
                         "Device maxCredentialCountInList (0x07): {}",
                         max_credential_count_in_list.unwrap()
@@ -217,8 +232,8 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x08: maxCredentialIdLength
             0x08 => {
-                if let Value::Integer(n) = val {
-                    max_credential_id_length = Some(*n);
+                if let Value::Integer(max_len) = val {
+                    max_credential_id_length = Some(*max_len);
                     log::info!(
                         "Device maxCredentialIdLength (0x08): {}",
                         max_credential_id_length.unwrap()
@@ -228,9 +243,10 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             // 0x0A: algorithms
             0x0A => {
                 if let Value::Array(arr) = val {
-                    for v in arr {
-                        if let Value::Map(m) = v
-                            && let Some(Value::Integer(alg_id)) = m.get(&Value::Text("alg".into()))
+                    for alg_entry in arr {
+                        if let Value::Map(alg_map) = alg_entry
+                            && let Some(Value::Integer(alg_id)) =
+                                alg_map.get(&Value::Text("alg".into()))
                         {
                             if let Some(alg) = CoseAlgorithm::from_i128(*alg_id) {
                                 algorithms.push(alg.to_string());
@@ -244,8 +260,8 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x0B: maxSerializedLargeBlobArray
             0x0B => {
-                if let Value::Integer(n) = val {
-                    max_serialized_large_blob_array = Some(*n);
+                if let Value::Integer(blob_max) = val {
+                    max_serialized_large_blob_array = Some(*blob_max);
                     log::info!(
                         "Device maxSerializedLargeBlobArray (0x0B): {}",
                         max_serialized_large_blob_array.unwrap()
@@ -254,8 +270,8 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x0C: forcePinChange
             0x0C => {
-                if let Value::Bool(b) = val {
-                    force_pin_change = Some(*b);
+                if let Value::Bool(force) = val {
+                    force_pin_change = Some(*force);
                     log::info!(
                         "Device forcePinChange (0x0C): {}",
                         force_pin_change.unwrap()
@@ -264,22 +280,22 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x0D: minPINLength
             0x0D => {
-                if let Value::Integer(n) = val {
-                    min_pin_length = *n;
+                if let Value::Integer(min_len) = val {
+                    min_pin_length = *min_len;
                     log::info!("Device minPINLength (0x0D): {}", min_pin_length);
                 }
             }
             // 0x0E: firmwareVersion
             0x0E => {
-                if let Value::Integer(n) = val {
-                    firmware_version_raw = *n;
+                if let Value::Integer(fw_ver) = val {
+                    firmware_version_raw = *fw_ver;
                     log::info!("Device firmwareVersion (0x0E): {}", firmware_version_raw);
                 }
             }
             // 0x0F: maxCredBlobLength
             0x0F => {
-                if let Value::Integer(n) = val {
-                    max_cred_blob_length = Some(*n);
+                if let Value::Integer(cred_blob) = val {
+                    max_cred_blob_length = Some(*cred_blob);
                     log::info!(
                         "Device maxCredBlobLength (0x0F): {}",
                         max_cred_blob_length.unwrap()
@@ -293,8 +309,8 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
             }
             // 0x14: remainingDiscoverableCredentials
             0x14 => {
-                if let Value::Integer(n) = val {
-                    remaining_discoverable_credentials = Some(*n);
+                if let Value::Integer(remaining) = val {
+                    remaining_discoverable_credentials = Some(*remaining);
                     log::info!(
                         "Device remainingDiscoverableCredentials (0x14): {}",
                         remaining_discoverable_credentials.unwrap()
@@ -320,20 +336,7 @@ fn parse_fido_get_info(info_val: &Value) -> Result<FidoDeviceInfo, String> {
         }
     }
 
-    let firmware_version = if firmware_version_raw > 0xFFFF {
-        format!(
-            "{}.{}.{}",
-            (firmware_version_raw >> 16) & 0xFF,
-            (firmware_version_raw >> 8) & 0xFF,
-            firmware_version_raw & 0xFF
-        )
-    } else {
-        format!(
-            "{}.{}",
-            (firmware_version_raw >> 8) & 0xFF,
-            firmware_version_raw & 0xFF
-        )
-    };
+    let firmware_version = format_firmware_version(firmware_version_raw);
 
     log::info!(
         "FIDO GetInfo parsed: {} versions, {} extensions, AAGUID={}, FW={}",
@@ -568,14 +571,14 @@ pub(crate) fn reset_device() -> Result<String, String> {
         HidTransport::open().map_err(|e| format!("Could not open HID transport: {}", e))?;
 
     transport.reset().map_err(|e| {
-        let s = e.to_string();
-        if s.contains("0x30") {
+        let error_text = e.to_string();
+        if error_text.contains("0x30") {
             return "Reset not allowed. The device must be unplugged and re-plugged within 10 seconds before sending the reset command.".to_string();
         }
-        if s.contains("0x27") {
+        if error_text.contains("0x27") {
             return "Reset declined. Touch was not confirmed on the device.".to_string();
         }
-        format!("Reset failed: {}", s)
+        format!("Reset failed: {}", error_text)
     })?;
 
     Ok("Device has been factory reset. All credentials and PIN have been erased.".to_string())
@@ -786,18 +789,18 @@ fn parse_management_info(raw: &[u8]) -> Result<ManagementInfo, String> {
             return Err(format!("truncated management tag 0x{:02X}", tag));
         }
 
-        let val = &data[i..i + len];
+        let field_data = &data[i..i + len];
         match tag {
-            0x01 => info.usb_supported = parse_management_u16(val),
-            0x02 if val.len() == 4 => {
-                info.serial = Some(hex::encode_upper(val));
+            0x01 => info.usb_supported = parse_management_u16(field_data),
+            0x02 if field_data.len() == 4 => {
+                info.serial = Some(hex::encode_upper(field_data));
             }
-            0x03 => info.usb_enabled = parse_management_u16(val),
-            0x05 if val.len() >= 2 => {
-                info.firmware_version = Some(format!("{}.{}", val[0], val[1]));
+            0x03 => info.usb_enabled = parse_management_u16(field_data),
+            0x05 if field_data.len() >= 2 => {
+                info.firmware_version = Some(format!("{}.{}", field_data[0], field_data[1]));
             }
             0x0A => {
-                if let Some(locked) = val.first() {
+                if let Some(locked) = field_data.first() {
                     info.config_locked = Some(*locked != 0);
                 }
             }
@@ -937,48 +940,53 @@ fn read_rskey_physical_config(transport: &HidTransport, mut config: AppConfig) -
         if i + len > data.len() {
             break;
         }
-        let val = &data[i..i + len];
+        let field_data = &data[i..i + len];
 
         match tag_byte {
-            RSKEY_PHY_TAG_VIDPID if val.len() == 4 => {
-                config.vid = format!("{:04X}", u16::from_be_bytes([val[0], val[1]]));
-                config.pid = format!("{:04X}", u16::from_be_bytes([val[2], val[3]]));
+            RSKEY_PHY_TAG_VIDPID if field_data.len() == 4 => {
+                config.vid = format!("{:04X}", u16::from_be_bytes([field_data[0], field_data[1]]));
+                config.pid = format!("{:04X}", u16::from_be_bytes([field_data[2], field_data[3]]));
             }
-            RSKEY_PHY_TAG_LED_GPIO if !val.is_empty() => {
-                config.led_gpio = val[0];
+            RSKEY_PHY_TAG_LED_GPIO if !field_data.is_empty() => {
+                config.led_gpio = field_data[0];
             }
-            RSKEY_PHY_TAG_LED_BRIGHTNESS if !val.is_empty() => {
-                config.led_brightness = val[0];
+            RSKEY_PHY_TAG_LED_BRIGHTNESS if !field_data.is_empty() => {
+                config.led_brightness = field_data[0];
             }
-            RSKEY_PHY_TAG_PRESENCE_TIMEOUT if !val.is_empty() => {
-                config.touch_timeout = val[0];
+            RSKEY_PHY_TAG_PRESENCE_TIMEOUT if !field_data.is_empty() => {
+                config.touch_timeout = field_data[0];
             }
             RSKEY_PHY_TAG_USB_PRODUCT => {
-                let s = std::str::from_utf8(val)
+                let product_str = std::str::from_utf8(field_data)
                     .unwrap_or("")
                     .trim_matches(char::from(0));
-                config.product_name = s.to_string();
+                config.product_name = product_str.to_string();
             }
-            RSKEY_PHY_TAG_OPTS if val.len() >= 2 => {
-                let opts = u16::from_be_bytes([val[0], val[1]]);
+            RSKEY_PHY_TAG_OPTS if field_data.len() >= 2 => {
+                let opts = u16::from_be_bytes([field_data[0], field_data[1]]);
                 config.led_dimmable = opts & RSKEY_OPT_DIMMABLE != 0;
                 config.power_cycle_on_reset = opts & RSKEY_OPT_DISABLE_POWER_RESET == 0;
                 config.led_steady = opts & RSKEY_OPT_LED_STEADY != 0;
             }
-            RSKEY_PHY_TAG_CURVES if val.len() == 4 => {
-                config.raw_curves_mask = Some(u32::from_be_bytes([val[0], val[1], val[2], val[3]]));
+            RSKEY_PHY_TAG_CURVES if field_data.len() == 4 => {
+                config.raw_curves_mask = Some(u32::from_be_bytes([
+                    field_data[0],
+                    field_data[1],
+                    field_data[2],
+                    field_data[3],
+                ]));
             }
-            RSKEY_PHY_TAG_LED_DRIVER if !val.is_empty() => {
-                config.led_driver = Some(val[0]);
+            RSKEY_PHY_TAG_LED_DRIVER if !field_data.is_empty() => {
+                config.led_driver = Some(field_data[0]);
             }
-            RSKEY_PHY_TAG_LED_ORDER if !val.is_empty() => {
-                config.led_order = Some(val[0]);
+            RSKEY_PHY_TAG_LED_ORDER if !field_data.is_empty() => {
+                config.led_order = Some(field_data[0]);
             }
-            RSKEY_PHY_TAG_LED_NUM if !val.is_empty() => {
-                config.led_num = Some(val[0]);
+            RSKEY_PHY_TAG_LED_NUM if !field_data.is_empty() => {
+                config.led_num = Some(field_data[0]);
             }
-            RSKEY_PHY_TAG_ENABLED_USB_ITF if !val.is_empty() => {
-                config.enabled_usb_itf = Some(val[0]);
+            RSKEY_PHY_TAG_ENABLED_USB_ITF if !field_data.is_empty() => {
+                config.enabled_usb_itf = Some(field_data[0]);
             }
             _ => {}
         }
@@ -1376,11 +1384,11 @@ pub(crate) fn upload_enterprise_attestation_cert(
             None,
         )
         .map_err(|e| {
-            let s = e.to_string();
-            if s.contains("0x2B") {
+            let error_text = e.to_string();
+            if error_text.contains("0x2B") {
                 return "Device does not support enterprise attestation (0x2B). Ensure firmware is up to date.".to_string();
             }
-            format!("Failed to obtain PIN token: {}", s)
+            format!("Failed to obtain PIN token: {}", error_text)
         })?;
 
     transport
@@ -1408,12 +1416,12 @@ pub(crate) fn enable_enterprise_attestation(pin: String) -> Result<String, Strin
             None,
         )
         .map_err(|e| {
-            let s = e.to_string();
-            log::error!("Failed to get PIN token: {}", s);
-            if s.contains("0x2B") {
+            let error_text = e.to_string();
+            log::error!("Failed to get PIN token: {}", error_text);
+            if error_text.contains("0x2B") {
                 return "Device does not support enterprise attestation (0x2B). Ensure firmware is up to date.".to_string();
             }
-            format!("Failed to obtain PIN token: {}", s)
+            format!("Failed to obtain PIN token: {}", error_text)
         })?;
 
     transport

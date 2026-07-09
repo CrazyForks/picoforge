@@ -242,7 +242,7 @@ impl RescueOperations for PcscTransport {
 
         // 2. Read Flash Info
         let mut rx_buf = [0; 256];
-        let rx_flash = self.transmit(
+        let flash_response = self.transmit(
             &[
                 APDU_CLA_PROPRIETARY,
                 RescueInstruction::Read as u8,
@@ -253,21 +253,21 @@ impl RescueOperations for PcscTransport {
             &mut rx_buf,
         )?;
 
-        if !rx_flash.ends_with(&SW_SUCCESS) {
+        if !flash_response.ends_with(&SW_SUCCESS) {
             return Err(PFError::Device("Failed to read flash".into()));
         }
 
-        let mut rdr = Cursor::new(&rx_flash[..rx_flash.len() - 2]);
-        let _free = rdr.read_u32::<BigEndian>().unwrap_or(0);
-        let used = rdr.read_u32::<BigEndian>().unwrap_or(0);
-        let total = rdr.read_u32::<BigEndian>().unwrap_or(0);
+        let mut cursor = Cursor::new(&flash_response[..flash_response.len() - 2]);
+        let _free = cursor.read_u32::<BigEndian>().unwrap_or(0);
+        let used = cursor.read_u32::<BigEndian>().unwrap_or(0);
+        let total = cursor.read_u32::<BigEndian>().unwrap_or(0);
 
         // NOTE: captured but currently unused variables
-        let _nfiles = rdr.read_u32::<BigEndian>().unwrap_or(0);
-        let _chip_size = rdr.read_u32::<BigEndian>().unwrap_or(0);
+        let _nfiles = cursor.read_u32::<BigEndian>().unwrap_or(0);
+        let _chip_size = cursor.read_u32::<BigEndian>().unwrap_or(0);
 
         // --- Read Secure Boot Status ---
-        let rx_secure = self.transmit(
+        let secure_response = self.transmit(
             &[
                 APDU_CLA_PROPRIETARY,
                 RescueInstruction::Read as u8,
@@ -278,13 +278,13 @@ impl RescueOperations for PcscTransport {
             &mut rx_buf,
         )?;
 
-        let (sb_enabled, sb_locked) = if rx_secure.ends_with(&[0x90, 0x00]) && rx_secure.len() >= 4
-        {
-            (rx_secure[0] != 0, rx_secure[1] != 0)
-        } else {
-            (false, false)
-        }; // --- Read PHY Config ---
-        let rx_phy = self.transmit(
+        let (sb_enabled, sb_locked) =
+            if secure_response.ends_with(&[0x90, 0x00]) && secure_response.len() >= 4 {
+                (secure_response[0] != 0, secure_response[1] != 0)
+            } else {
+                (false, false)
+            }; // --- Read PHY Config ---
+        let phy_response = self.transmit(
             &[
                 APDU_CLA_PROPRIETARY,
                 RescueInstruction::Read as u8,
@@ -295,61 +295,61 @@ impl RescueOperations for PcscTransport {
             &mut rx_buf,
         )?;
 
-        if !rx_phy.ends_with(&[0x90, 0x00]) {
+        if !phy_response.ends_with(&[0x90, 0x00]) {
             return Err(PFError::Device("Failed to read config".into()));
         }
 
         // Parse TLV
         let mut config = AppConfig::default();
-        let data = &rx_phy[..rx_phy.len() - 2];
-        let mut i = 0;
-        while i < data.len() {
-            if i + 2 > data.len() {
+        let data = &phy_response[..phy_response.len() - 2];
+        let mut offset = 0;
+        while offset < data.len() {
+            if offset + 2 > data.len() {
                 break;
             }
-            let tag_byte = data[i];
-            let len = data[i + 1] as usize;
-            i += 2;
-            if i + len > data.len() {
+            let tag_byte = data[offset];
+            let field_len = data[offset + 1] as usize;
+            offset += 2;
+            if offset + field_len > data.len() {
                 break;
             }
-            let val = &data[i..i + len];
+            let field_data = &data[offset..offset + field_len];
 
             if let Some(tag) = PhyTag::from_u8(tag_byte) {
                 match tag {
                     PhyTag::VidPid => {
-                        if val.len() == 4 {
-                            let vid = u16::from_be_bytes([val[0], val[1]]);
-                            let pid = u16::from_be_bytes([val[2], val[3]]);
+                        if field_data.len() == 4 {
+                            let vid = u16::from_be_bytes([field_data[0], field_data[1]]);
+                            let pid = u16::from_be_bytes([field_data[2], field_data[3]]);
                             config.vid = format!("{:04X}", vid);
                             config.pid = format!("{:04X}", pid);
                         }
                     }
                     PhyTag::LedGpio => {
-                        if !val.is_empty() {
-                            config.led_gpio = val[0];
+                        if !field_data.is_empty() {
+                            config.led_gpio = field_data[0];
                         }
                     }
                     PhyTag::LedBrightness => {
-                        if !val.is_empty() {
-                            config.led_brightness = val[0];
+                        if !field_data.is_empty() {
+                            config.led_brightness = field_data[0];
                         }
                     }
                     PhyTag::PresenceTimeout => {
-                        if !val.is_empty() {
-                            config.touch_timeout = val[0];
+                        if !field_data.is_empty() {
+                            config.touch_timeout = field_data[0];
                         }
                     }
                     PhyTag::UsbProduct => {
-                        let s = std::str::from_utf8(val)
+                        let product_str = std::str::from_utf8(field_data)
                             .unwrap_or("")
                             .trim_matches(char::from(0));
-                        config.product_name = s.to_string();
+                        config.product_name = product_str.to_string();
                     }
                     PhyTag::Opts => {
-                        if val.len() >= 2 {
-                            let opts_val = u16::from_be_bytes([val[0], val[1]]);
-                            let opts = RescueOptions::from_bits_truncate(opts_val);
+                        if field_data.len() >= 2 {
+                            let options_raw = u16::from_be_bytes([field_data[0], field_data[1]]);
+                            let opts = RescueOptions::from_bits_truncate(options_raw);
 
                             config.led_dimmable = opts.contains(RescueOptions::LED_DIMMABLE);
                             config.power_cycle_on_reset =
@@ -358,36 +358,41 @@ impl RescueOperations for PcscTransport {
                         }
                     }
                     PhyTag::Curves => {
-                        if val.len() == 4 {
-                            let curves_val = u32::from_be_bytes([val[0], val[1], val[2], val[3]]);
-                            config.raw_curves_mask = Some(curves_val);
-                            let curves = RescueCurves::from_bits_truncate(curves_val);
+                        if field_data.len() == 4 {
+                            let raw_curves_value = u32::from_be_bytes([
+                                field_data[0],
+                                field_data[1],
+                                field_data[2],
+                                field_data[3],
+                            ]);
+                            config.raw_curves_mask = Some(raw_curves_value);
+                            let curves = RescueCurves::from_bits_truncate(raw_curves_value);
                             config.enable_secp256k1 = curves.contains(RescueCurves::SECP256K1);
                         }
                     }
                     PhyTag::LedDriver => {
-                        if !val.is_empty() {
-                            config.led_driver = Some(val[0]);
+                        if !field_data.is_empty() {
+                            config.led_driver = Some(field_data[0]);
                         }
                     }
                     PhyTag::LedOrder => {
-                        if !val.is_empty() {
-                            config.led_order = Some(val[0]);
+                        if !field_data.is_empty() {
+                            config.led_order = Some(field_data[0]);
                         }
                     }
                     PhyTag::LedNum => {
-                        if !val.is_empty() {
-                            config.led_num = Some(val[0]);
+                        if !field_data.is_empty() {
+                            config.led_num = Some(field_data[0]);
                         }
                     }
                     PhyTag::EnabledUsbItf => {
-                        if !val.is_empty() {
-                            config.enabled_usb_itf = Some(val[0]);
+                        if !field_data.is_empty() {
+                            config.enabled_usb_itf = Some(field_data[0]);
                         }
                     }
                 }
             }
-            i += len;
+            offset += field_len;
         }
 
         log::info!(
@@ -779,34 +784,34 @@ impl RescueOperations for PcscTransport {
         };
 
         let mut config = ManagementAppConfig::default();
-        let mut i = 0;
-        while i < tlv_data.len() {
-            if i + 2 > tlv_data.len() {
+        let mut offset = 0;
+        while offset < tlv_data.len() {
+            if offset + 2 > tlv_data.len() {
                 break;
             }
-            let tag = tlv_data[i];
-            let len = tlv_data[i + 1] as usize;
-            i += 2;
-            if i + len > tlv_data.len() {
+            let tag = tlv_data[offset];
+            let field_len = tlv_data[offset + 1] as usize;
+            offset += 2;
+            if offset + field_len > tlv_data.len() {
                 break;
             }
-            let val = &tlv_data[i..i + len];
+            let field_data = &tlv_data[offset..offset + field_len];
             match tag {
                 MGMT_TAG_USB_SUPPORTED => {
-                    if val.len() >= 2 {
-                        config.usb_supported = u16::from_be_bytes([val[0], val[1]]);
+                    if field_data.len() >= 2 {
+                        config.usb_supported = u16::from_be_bytes([field_data[0], field_data[1]]);
                     }
                 }
                 MGMT_TAG_USB_ENABLED => {
-                    if val.len() >= 2 {
-                        config.usb_enabled = u16::from_be_bytes([val[0], val[1]]);
+                    if field_data.len() >= 2 {
+                        config.usb_enabled = u16::from_be_bytes([field_data[0], field_data[1]]);
                     }
                 }
                 _ => {
                     log::trace!("Management TLV tag 0x{:02X} skipped", tag);
                 }
             }
-            i += len;
+            offset += field_len;
         }
 
         log::info!(

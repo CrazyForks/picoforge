@@ -86,13 +86,13 @@ impl AnyFirmware {
     /// Construct an `AnyFirmware` from a known firmware type and version string.
     ///
     /// LkOne and Unknown are treated as pico-fido variants.
-    pub fn new(fw_type: FirmwareType, version: &str) -> Self {
-        let ver = FirmwareVersion::parse(version).unwrap_or_default();
-        match fw_type {
-            FirmwareType::PicoFido => Self::PicoFido(PicoFidoFirmware::new(ver)),
-            FirmwareType::RSKey => Self::RSKey(RSKeyFirmware::new(ver)),
+    pub fn new(firmware_variant: FirmwareType, version: &str) -> Self {
+        let firmware_version = FirmwareVersion::parse(version).unwrap_or_default();
+        match firmware_variant {
+            FirmwareType::PicoFido => Self::PicoFido(PicoFidoFirmware::new(firmware_version)),
+            FirmwareType::RSKey => Self::RSKey(RSKeyFirmware::new(firmware_version)),
             FirmwareType::LkOne | FirmwareType::Unknown => {
-                Self::PicoFido(PicoFidoFirmware::new(ver))
+                Self::PicoFido(PicoFidoFirmware::new(firmware_version))
             }
         }
     }
@@ -101,15 +101,19 @@ impl AnyFirmware {
     ///
     /// The flag is only meaningful for `FirmwareType::PicoFido`; other types
     /// ignore it.
-    pub fn new_with_legacy(fw_type: FirmwareType, version: &str, has_legacy_vendor: bool) -> Self {
-        let ver = FirmwareVersion::parse(version).unwrap_or_default();
-        match fw_type {
-            FirmwareType::PicoFido => {
-                Self::PicoFido(PicoFidoFirmware::new(ver).with_legacy_vendor(has_legacy_vendor))
-            }
-            FirmwareType::RSKey => Self::RSKey(RSKeyFirmware::new(ver)),
+    pub fn new_with_legacy(
+        firmware_variant: FirmwareType,
+        version: &str,
+        has_legacy_vendor: bool,
+    ) -> Self {
+        let firmware_version = FirmwareVersion::parse(version).unwrap_or_default();
+        match firmware_variant {
+            FirmwareType::PicoFido => Self::PicoFido(
+                PicoFidoFirmware::new(firmware_version).with_legacy_vendor(has_legacy_vendor),
+            ),
+            FirmwareType::RSKey => Self::RSKey(RSKeyFirmware::new(firmware_version)),
             FirmwareType::LkOne | FirmwareType::Unknown => {
-                Self::PicoFido(PicoFidoFirmware::new(ver))
+                Self::PicoFido(PicoFidoFirmware::new(firmware_version))
             }
         }
     }

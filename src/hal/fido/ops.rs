@@ -342,8 +342,8 @@ impl FidoOperations for HidTransport {
                 Ok(())
             }
             Err(e) => {
-                let err_str = e.to_string();
-                log::error!("Failed to enable Enterprise Attestation: {}", err_str);
+                let error_string = e.to_string();
+                log::error!("Failed to enable Enterprise Attestation: {}", error_string);
                 Err(PFError::Device(format!(
                     "EnableEnterpriseAttestation failed: {}",
                     e
@@ -387,11 +387,11 @@ impl FidoOperations for HidTransport {
                 Ok(())
             }
             Err(e) => {
-                let err_str = e.to_string();
-                log::error!("Failed to send setMinPINLength config: {}", err_str);
+                let error_string = e.to_string();
+                log::error!("Failed to send setMinPINLength config: {}", error_string);
 
                 // Check for PIN policy violation (0x37) - cannot decrease min PIN length
-                if err_str.contains("0x37") {
+                if error_string.contains("0x37") {
                     return Err(PFError::Device(
                         "Cannot decrease minimum PIN length. The FIDO2 security policy only allows increasing the minimum PIN length, not decreasing it. A device reset is required to lower the minimum.".into()
                     ));
@@ -422,8 +422,8 @@ impl FidoOperations for HidTransport {
         payload.extend(to_vec(&Value::Map(map)).map_err(|e| PFError::Io(e.to_string()))?);
 
         log::debug!("Sending GetKeyAgreement command...");
-        let resp = self.send_cbor(CTAPHID_CBOR, &payload)?;
-        let val: Value = from_slice(&resp).map_err(|e| PFError::Io(e.to_string()))?;
+        let response = self.send_cbor(CTAPHID_CBOR, &payload)?;
+        let val: Value = from_slice(&response).map_err(|e| PFError::Io(e.to_string()))?;
 
         if let Value::Map(m) = val {
             log::debug!("GetKeyAgreement response: {:?}", m);
@@ -454,16 +454,16 @@ impl FidoOperations for HidTransport {
         let auth_key_agreement = self.get_key_agreement()?;
 
         // 2. Generate Platform Key Pair (P-256)
-        let rng = ring::rand::SystemRandom::new();
+        let system_rng = ring::rand::SystemRandom::new();
         let platform_private_key =
-            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng)
+            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &system_rng)
                 .map_err(|_| PFError::Device("Failed to generate platform ephemeral key".into()))?;
         let platform_public_key_bytes = platform_private_key
             .compute_public_key()
             .map_err(|_| PFError::Device("Failed to compute platform public key".into()))?;
 
         // 3. Extract Authenticator Public Key (X and Y coordinates)
-        let (auth_x, auth_y) = if let Value::Map(m) = &auth_key_agreement {
+        let (auth_point_x, auth_point_y) = if let Value::Map(m) = &auth_key_agreement {
             let x = match m.get(&Value::Integer(-2)) {
                 Some(Value::Bytes(b)) => b,
                 _ => return Err(PFError::Device("Invalid KeyAgreement X coordinate".into())),
@@ -478,8 +478,8 @@ impl FidoOperations for HidTransport {
         };
 
         let mut auth_pub_key_bytes = vec![0x04];
-        auth_pub_key_bytes.extend(auth_x);
-        auth_pub_key_bytes.extend(auth_y);
+        auth_pub_key_bytes.extend(auth_point_x);
+        auth_pub_key_bytes.extend(auth_point_y);
 
         let auth_unparsed_pub_key =
             agreement::UnparsedPublicKey::new(&agreement::ECDH_P256, auth_pub_key_bytes);
@@ -527,8 +527,8 @@ impl FidoOperations for HidTransport {
         payload.extend(payload_cbor);
 
         log::debug!("Sending getPinToken command...");
-        let resp = self.send_cbor(CTAPHID_CBOR, &payload)?;
-        let val: Value = from_slice(&resp).map_err(|e| PFError::Io(e.to_string()))?;
+        let response = self.send_cbor(CTAPHID_CBOR, &payload)?;
+        let val: Value = from_slice(&response).map_err(|e| PFError::Io(e.to_string()))?;
 
         if let Value::Map(m) = val {
             log::debug!("getPinToken response: {:?}", m);
@@ -572,16 +572,16 @@ impl FidoOperations for HidTransport {
         let auth_key_agreement = self.get_key_agreement()?;
 
         // 2. Generate Platform Key Pair (P-256)
-        let rng = ring::rand::SystemRandom::new();
+        let system_rng = ring::rand::SystemRandom::new();
         let platform_private_key =
-            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng)
+            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &system_rng)
                 .map_err(|_| PFError::Device("Failed to generate platform ephemeral key".into()))?;
         let platform_public_key_bytes = platform_private_key
             .compute_public_key()
             .map_err(|_| PFError::Device("Failed to compute platform public key".into()))?;
 
         // 3. Extract Authenticator Public Key (X and Y coordinates)
-        let (auth_x, auth_y) = if let Value::Map(m) = &auth_key_agreement {
+        let (auth_point_x, auth_point_y) = if let Value::Map(m) = &auth_key_agreement {
             let x = match m.get(&Value::Integer(-2)) {
                 Some(Value::Bytes(b)) => b,
                 _ => return Err(PFError::Device("Invalid KeyAgreement X coordinate".into())),
@@ -596,8 +596,8 @@ impl FidoOperations for HidTransport {
         };
 
         let mut auth_pub_key_bytes = vec![0x04];
-        auth_pub_key_bytes.extend(auth_x);
-        auth_pub_key_bytes.extend(auth_y);
+        auth_pub_key_bytes.extend(auth_point_x);
+        auth_pub_key_bytes.extend(auth_point_y);
 
         let auth_unparsed_pub_key =
             agreement::UnparsedPublicKey::new(&agreement::ECDH_P256, auth_pub_key_bytes);
@@ -649,12 +649,12 @@ impl FidoOperations for HidTransport {
         payload.extend(payload_cbor);
 
         log::debug!("Sending getPinUvAuthTokenUsingPinWithPermissions command...");
-        let resp = self.send_cbor(CTAPHID_CBOR, &payload)?;
+        let response = self.send_cbor(CTAPHID_CBOR, &payload)?;
         log::debug!(
             "getPinUvAuthTokenUsingPinWithPermissions response: {:?}",
-            resp
+            response
         );
-        let val: Value = from_slice(&resp).map_err(|e| PFError::Io(e.to_string()))?;
+        let val: Value = from_slice(&response).map_err(|e| PFError::Io(e.to_string()))?;
 
         if let Value::Map(m) = val {
             log::debug!("getPinUvAuthTokenUsingPinWithPermissions response: {:?}", m);
@@ -705,16 +705,16 @@ impl FidoOperations for HidTransport {
         let auth_key_agreement = self.get_key_agreement()?;
 
         // 2. Generate Platform Key Pair (P-256)
-        let rng = ring::rand::SystemRandom::new();
+        let system_rng = ring::rand::SystemRandom::new();
         let platform_private_key =
-            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng)
+            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &system_rng)
                 .map_err(|_| PFError::Device("Failed to generate platform ephemeral key".into()))?;
         let platform_public_key_bytes = platform_private_key
             .compute_public_key()
             .map_err(|_| PFError::Device("Failed to compute platform public key".into()))?;
 
         // 3. Extract Authenticator Public Key
-        let (auth_x, auth_y) = if let Value::Map(m) = &auth_key_agreement {
+        let (auth_point_x, auth_point_y) = if let Value::Map(m) = &auth_key_agreement {
             let x = match m.get(&Value::Integer(-2)) {
                 Some(Value::Bytes(b)) => b,
                 _ => return Err(PFError::Device("Invalid KeyAgreement X coordinate".into())),
@@ -729,8 +729,8 @@ impl FidoOperations for HidTransport {
         };
 
         let mut auth_pub_key_bytes = vec![0x04];
-        auth_pub_key_bytes.extend(auth_x);
-        auth_pub_key_bytes.extend(auth_y);
+        auth_pub_key_bytes.extend(auth_point_x);
+        auth_pub_key_bytes.extend(auth_point_y);
 
         let auth_unparsed_pub_key =
             agreement::UnparsedPublicKey::new(&agreement::ECDH_P256, auth_pub_key_bytes);
@@ -796,9 +796,9 @@ impl FidoOperations for HidTransport {
                 Ok(())
             }
             Err(e) => {
-                let err_str = e.to_string();
-                log::error!("Failed to send setPin config: {}", err_str);
-                if err_str.contains("0x37") {
+                let error_string = e.to_string();
+                log::error!("Failed to send setPin config: {}", error_string);
+                if error_string.contains("0x37") {
                     return Err(PFError::Device(
                         "New PIN violates policy (e.g. too short).".into(),
                     ));
@@ -836,16 +836,16 @@ impl FidoOperations for HidTransport {
         let auth_key_agreement = self.get_key_agreement()?;
 
         // 2. Generate Platform Key Pair (P-256)
-        let rng = ring::rand::SystemRandom::new();
+        let system_rng = ring::rand::SystemRandom::new();
         let platform_private_key =
-            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng)
+            agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &system_rng)
                 .map_err(|_| PFError::Device("Failed to generate platform ephemeral key".into()))?;
         let platform_public_key_bytes = platform_private_key
             .compute_public_key()
             .map_err(|_| PFError::Device("Failed to compute platform public key".into()))?;
 
         // 3. Extract Authenticator Public Key
-        let (auth_x, auth_y) = if let Value::Map(m) = &auth_key_agreement {
+        let (auth_point_x, auth_point_y) = if let Value::Map(m) = &auth_key_agreement {
             let x = match m.get(&Value::Integer(-2)) {
                 Some(Value::Bytes(b)) => b,
                 _ => return Err(PFError::Device("Invalid KeyAgreement X coordinate".into())),
@@ -860,8 +860,8 @@ impl FidoOperations for HidTransport {
         };
 
         let mut auth_pub_key_bytes = vec![0x04];
-        auth_pub_key_bytes.extend(auth_x);
-        auth_pub_key_bytes.extend(auth_y);
+        auth_pub_key_bytes.extend(auth_point_x);
+        auth_pub_key_bytes.extend(auth_point_y);
 
         let auth_unparsed_pub_key =
             agreement::UnparsedPublicKey::new(&agreement::ECDH_P256, auth_pub_key_bytes);
@@ -943,17 +943,17 @@ impl FidoOperations for HidTransport {
                 Ok(())
             }
             Err(e) => {
-                let err_str = e.to_string();
-                log::error!("Failed to send changePin config: {}", err_str);
-                if err_str.contains("0x31") {
+                let error_string = e.to_string();
+                log::error!("Failed to send changePin config: {}", error_string);
+                if error_string.contains("0x31") {
                     return Err(PFError::Device("Invalid current PIN (0x31). Please check that you entered the correct PIN.".into()));
                 }
-                if err_str.contains("0x32") {
+                if error_string.contains("0x32") {
                     return Err(PFError::Device(
                         "PIN blocked (0x32). Device reset may be required.".into(),
                     ));
                 }
-                if err_str.contains("0x37") {
+                if error_string.contains("0x37") {
                     return Err(PFError::Device(
                         "New PIN violates policy (e.g. too short).".into(),
                     ));
@@ -1096,7 +1096,7 @@ impl FidoOperations for HidTransport {
         let mut payload = vec![CtapCommand::CredentialMgmt as u8];
         payload.extend(to_vec(&Value::Map(mgmt_map)).map_err(|e| PFError::Io(e.to_string()))?);
 
-        let resp = match self.send_cbor(CTAPHID_CBOR, &payload) {
+        let response = match self.send_cbor(CTAPHID_CBOR, &payload) {
             Ok(r) => r,
             Err(e) => {
                 if e.to_string().contains("0x2E") {
@@ -1107,7 +1107,7 @@ impl FidoOperations for HidTransport {
             }
         };
 
-        let val: Value = from_slice(&resp).map_err(|e| PFError::Io(e.to_string()))?;
+        let val: Value = from_slice(&response).map_err(|e| PFError::Io(e.to_string()))?;
         let mut total_rps = None;
 
         if let Value::Map(m) = &val {
@@ -1153,8 +1153,8 @@ impl FidoOperations for HidTransport {
             payload.extend(to_vec(&Value::Map(mgmt_map)).map_err(|e| PFError::Io(e.to_string()))?);
 
             match self.send_cbor(CTAPHID_CBOR, &payload) {
-                Ok(resp) => {
-                    let val: Value = from_slice(&resp).map_err(|e| PFError::Io(e.to_string()))?;
+                Ok(rsp) => {
+                    let val: Value = from_slice(&rsp).map_err(|e| PFError::Io(e.to_string()))?;
                     if let Value::Map(m) = val {
                         let rp = m
                             .get(&Value::Integer(CredentialMgmtResponseParam::Rp as i128))
@@ -1252,7 +1252,7 @@ impl FidoOperations for HidTransport {
         let mut payload = vec![CtapCommand::CredentialMgmt as u8];
         payload.extend(to_vec(&Value::Map(mgmt_map)).map_err(|e| PFError::Io(e.to_string()))?);
 
-        let resp = match self.send_cbor(CTAPHID_CBOR, &payload) {
+        let response = match self.send_cbor(CTAPHID_CBOR, &payload) {
             Ok(r) => r,
             Err(e) => {
                 if e.to_string().contains("0x2E") {
@@ -1262,7 +1262,7 @@ impl FidoOperations for HidTransport {
             }
         };
 
-        let val: Value = from_slice(&resp).map_err(|e| PFError::Io(e.to_string()))?;
+        let val: Value = from_slice(&response).map_err(|e| PFError::Io(e.to_string()))?;
         let mut total_creds = None;
 
         if let Value::Map(m) = &val {
@@ -1321,8 +1321,8 @@ impl FidoOperations for HidTransport {
             payload.extend(to_vec(&Value::Map(mgmt_map)).map_err(|e| PFError::Io(e.to_string()))?);
 
             match self.send_cbor(CTAPHID_CBOR, &payload) {
-                Ok(resp) => {
-                    let val: Value = from_slice(&resp).map_err(|e| PFError::Io(e.to_string()))?;
+                Ok(rsp) => {
+                    let val: Value = from_slice(&rsp).map_err(|e| PFError::Io(e.to_string()))?;
                     if let Value::Map(m) = val {
                         let user = m
                             .get(&Value::Integer(CredentialMgmtResponseParam::User as i128))
@@ -1571,13 +1571,13 @@ mod tests {
         inner_map.insert(Value::Integer(-2), Value::Bytes(vec![0xAA; 32])); // x
         inner_map.insert(Value::Integer(-3), Value::Bytes(vec![0xBB; 32])); // y
 
-        let mut resp_map = BTreeMap::new();
-        resp_map.insert(
+        let mut response_map = BTreeMap::new();
+        response_map.insert(
             Value::Integer(ClientPinResponseParam::KeyAgreement as i128),
             Value::Map(inner_map),
         );
 
-        let val = Value::Map(resp_map);
+        let val = Value::Map(response_map);
 
         // This mimics the logic in get_key_agreement
         if let Value::Map(m) = val {
