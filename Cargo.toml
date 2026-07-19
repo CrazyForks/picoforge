@@ -20,7 +20,10 @@ hex = "0.4"           # For parsing VID/PID strings
 byteorder = "1.5"     # Required for writing Big-Endian numbers (firmware requirement)
 thiserror = "2"       # Makes custom error handling much easier
 anyhow = "1"          # For easy error propagation
-hidapi = "2.6"        # For fido2 interface operations but non-standard commands
+# macos-shared-device opens the FIDO HID non-exclusively; without it macOS holds
+# FIDO devices exclusively and hidapi's open fails (0xE00002C5), stranding the
+# whole FIDO transport. No-op on Linux/Windows. See hid_darwin_set_open_exclusive.
+hidapi = { version = "2.6", features = ["macos-shared-device"] } # fido2 + non-standard cmds
 serde_cbor_2 = "0.13"
 rand = "0.10"
 bitflags = "2.13.0"
