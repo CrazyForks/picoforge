@@ -1031,7 +1031,9 @@ fn build_rskey_phy_tlv(config: &AppConfigInput) -> Result<Vec<u8>, PFError> {
         // Firmware accepts a product record of 1..=33 bytes (name + trailing NUL),
         // so the name must be <= 32 bytes — reject rather than emit a wrapped length.
         if bytes.len() + 1 > 33 {
-            return Err(PFError::Device("Product name too long (max 32 bytes).".into()));
+            return Err(PFError::Device(
+                "Product name too long (max 32 bytes).".into(),
+            ));
         }
         tlv.push(RSKEY_PHY_TAG_USB_PRODUCT);
         tlv.push((bytes.len() + 1) as u8);
@@ -1467,7 +1469,10 @@ pub(crate) fn read_rskey_led_config(transport: &HidTransport) -> Result<LedStatu
     // `EF_LED_CONF` block. `parse_led_block` handles the 17/13/9-byte layouts.
     let data = transport.rs_key_config_read(RSKEY_CFG_TARGET_LED)?;
     let (steady, statuses) = crate::hal::common::parse_led_block(&data).ok_or_else(|| {
-        PFError::Device(format!("LED config response too short: {} bytes", data.len()))
+        PFError::Device(format!(
+            "LED config response too short: {} bytes",
+            data.len()
+        ))
     })?;
 
     log::info!(

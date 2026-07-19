@@ -8,10 +8,12 @@
 - [jetcookies](https://github.com/jetcookies): Contributed `package.nix` file for nix packaging of the application and maintains the nix flake of the application.
 - [Sylvain Pelissier](https://github.com/sylvainpelissier): Worked on the Enterprise attestation features.
 - [kralonur](https://github.com/kralonur): Improved Pico-FIDO 7.6 compatibility and preserved legacy FIDO hardware configuration support.
+- [TheMaxMur](https://github.com/TheMaxMur): Add RS-Key support.
 
 **Third-party Libraries**
 
 - [Pico FIDO](https://github.com/polhenarejos/pico-fido) - The firmware this tool configures
+- [RS-Key](https://github.com/TheMaxMur/RS-Key) - The second firmware this tool configures
 - [GPUI](https://www.gpui.rs/) - UI framework written in rust
 - [gpui-component](https://longbridge.github.io/gpui-component/) - UI components for GPUI framework
 - [pcsc-rust](https://github.com/bluetech/pcsc-rust) - Smart card interface

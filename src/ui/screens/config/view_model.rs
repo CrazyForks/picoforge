@@ -761,7 +761,14 @@ impl ConfigViewModel {
             let new_curves_mask = Self::curves_mask_from_toggles(self);
             let changed = Some(new_curves_mask) != raw_curves_mask
                 || (raw_curves_mask.is_none() && new_curves_mask != 0);
-            (changed, if changed { Some(new_curves_mask) } else { raw_curves_mask })
+            (
+                changed,
+                if changed {
+                    Some(new_curves_mask)
+                } else {
+                    raw_curves_mask
+                },
+            )
         };
         if has_curve_changes {
             has_changes = true;
