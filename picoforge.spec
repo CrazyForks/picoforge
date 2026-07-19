@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           picoforge
-Version:        0.7.0
-Release:        2%{?dist}
+Version:        0.7.1
+Release:        1%{?dist}
 Summary:        An open source commissioning tool for Pico FIDO security keys. Developed with Rust and GPUI.
 License:        AGPL-3.0
 URL:            https://github.com/librekeys/picoforge
@@ -72,6 +72,11 @@ install -m 644 static/appIcons/in.suyogtandel.picoforge.svg %{buildroot}%{_datad
 %{_datadir}/icons/hicolor/scalable/apps/in.suyogtandel.picoforge.svg
 
 %changelog
+* Sun Jul 19 2026 Suyog Tandel <git@suyogtandel.in> 0.7.1-1
+- chore: sync spec to 0.7.1-1 [skip ci] (git@suyogtandel.in)
+- feat: update flathub metainfo and increment app ver to 0.7.1
+  (git@suyogtandel.in)
+
 * Sun Jul 19 2026 Suyog Tandel <git@suyogtandel.in> 0.7.0-2
 - chore: sync spec to 0.7.0-2 [skip ci] (git@suyogtandel.in)
 - feat: add wiki button in about screen and update application description
