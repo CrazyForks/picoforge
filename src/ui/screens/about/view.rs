@@ -36,7 +36,7 @@ impl Render for AboutViewModel {
                                             .text_color(theme.foreground)
                                             .child("PicoForge"),
                                     )
-                                    .child(Tag::new("v0.7.0"))
+                                    .child(Tag::new("v0.7.1"))
                                     .child(
                                         div()
                                             .text_color(theme.muted_foreground)

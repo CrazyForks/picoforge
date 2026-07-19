@@ -59,27 +59,39 @@
   </screenshots>
 
   <releases>
-    <release version="0.5.0" date="2026-03-06">
-      <url type="details">https://github.com/librekeys/picoforge/releases/tag/v0.5.0</url>
+    <release version="0.7.1" date="2026-07-19">
+        <url type="details">https://github.com/librekeys/picoforge/releases/tag/v0.7.1</url>
         <description translate="no">
-          <p>Release 0.5.0</p>
-          <ul>
+        <p>Release 0.7.1</p>
+        <ul>
+            <li>Add support for RS-Key firmware</li>
+            <li>Auto detect connection of firmware devices</li>
+            <li>Reset fido storage and wipe passkeys</li>
+            <li>Fix minor bugs and race conditions while config of firmware devices</li>
+        </ul>
+        </description>
+    </release>
+    <release version="0.5.0" date="2026-03-06">
+        <url type="details">https://github.com/librekeys/picoforge/releases/tag/v0.5.0</url>
+        <description translate="no">
+        <p>Release 0.5.0</p>
+        <ul>
             <li>Add support for LibreKeys One firmware version 7.4.2</li>
             <li>Add support for pico-fido firmware version 7.4</li>
             <li>Improve Sidebar handling</li>
             <li>Fix application crashing while parsing stored passkeys</li>
-          </ul>
+        </ul>
         </description>
-      </release>
+    </release>
     <release version="0.4.1" date="2026-02-22">
-      <url type="details">https://github.com/librekeys/picoforge/releases/tag/v0.4.1</url>
-      <description translate="no">
+        <url type="details">https://github.com/librekeys/picoforge/releases/tag/v0.4.1</url>
+        <description translate="no">
         <p>Release 0.4.1</p>
         <ul>
-          <li>Drop tauri in favor of GPUI for the GUI of the application</li>
-          <li>Improve Passkeys Management UI</li>
+            <li>Drop tauri in favor of GPUI for the GUI of the application</li>
+            <li>Improve Passkeys Management UI</li>
         </ul>
-      </description>
+        </description>
     </release>
   </releases>
 
