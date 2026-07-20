@@ -19,12 +19,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # MacOS Builds:
           - platform: "macos-latest"
             args: "--target aarch64-apple-darwin"
             build_type: "standard"
           - platform: "macos-latest"
             args: "--target x86_64-apple-darwin"
             build_type: "standard"
+
+          # Linux Builds:
           - platform: "ubuntu-22.04"
             args: ""
             build_type: "standard"
@@ -37,6 +40,20 @@ jobs:
           - platform: "ubuntu-24.04-arm"
             args: ""
             build_type: "flatpak"
+          - platform: "ubuntu-latest"
+            appimage_variant: "glibc-2.28-x86_64"
+            build_type: "appimage"
+          - platform: "ubuntu-latest"
+            appimage_variant: "musl-x86_64"
+            build_type: "appimage"
+          - platform: "ubuntu-24.04-arm"
+            appimage_variant: "glibc-2.28-aarch64"
+            build_type: "appimage"
+          - platform: "ubuntu-24.04-arm"
+            appimage_variant: "musl-aarch64"
+            build_type: "appimage"
+
+          # Windows Builds:
           - platform: "windows-latest"
             args: "--target x86_64-pc-windows-msvc"
             build_type: "standard"
@@ -53,7 +70,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: install Rust stable
+      - name: Install Rust stable
         if: matrix.build_type == 'standard'
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -67,7 +84,7 @@ jobs:
         with:
           key: ${{ matrix.platform }}-${{ matrix.args }}
 
-      - name: install dependencies (ubuntu only)
+      - name: Install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-24.04-arm'
         run: |
           sudo apt-get update
@@ -93,7 +110,7 @@ jobs:
               libxcb-shape0-dev \
               libxcb-xfixes0-dev libusb-1.0-0-dev podman patchelf librsvg2-dev libappindicator3-dev libwebkit2gtk-4.1-dev
 
-      - name: install dependencies (ubuntu-arm64 only)
+      - name: Install dependencies (ubuntu-arm64 only)
         if: matrix.platform == 'ubuntu-24.04-arm'
         run: |
           sudo apt-get install xdg-utils
@@ -107,7 +124,7 @@ jobs:
           echo "Version found: $version"
           echo "version=$version" >> $GITHUB_ENV
 
-      - name: install cargo-packager
+      - name: Install cargo-packager
         if: matrix.build_type == 'standard'
         uses: taiki-e/install-action@v2
         with:
@@ -125,11 +142,19 @@ jobs:
         if: (matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-24.04-arm') && matrix.build_type == 'standard'
         run: cargo packager --release --formats deb,pacman
 
-      - name: Build AppImage
-        if: (matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-24.04-arm') && matrix.build_type == 'standard'
+      - name: Build AppImage (via Container)
+        if: matrix.build_type == 'appimage'
         run: |
-          chmod +x .github/scripts/build_appimage.sh
-          ./.github/scripts/build_appimage.sh
+          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/picoforge-appimage-builder:${{ matrix.appimage_variant }}"
+          echo "Pulling container: ${IMAGE_NAME}"
+          podman pull "${IMAGE_NAME}"
+
+          mkdir -p target/release
+          echo "Running build inside container..."
+          podman run --rm \
+            -v "${{ github.workspace }}":/workspace:z \
+            "${IMAGE_NAME}" \
+            /workspace/.github/scripts/build_appimage.sh ${{ matrix.appimage_variant }}
 
       - name: Build Flatpak
         if: matrix.build_type == 'flatpak'

@@ -1,0 +1,58 @@
+name: Publish Builder Containers to GHCR
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'Containerfile.*'
+      - '.github/workflows/publish-containers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-container:
+    name: Build & Push ${{ matrix.variant }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: glibc-2.28-x86_64
+            runner: ubuntu-latest
+            containerfile: Containerfile.glibc-x86_64
+          - variant: glibc-2.28-aarch64
+            runner: ubuntu-24.04-arm
+            containerfile: Containerfile.glibc-aarch64
+          - variant: musl-x86_64
+            runner: ubuntu-latest
+            containerfile: Containerfile.musl-x86_64
+          - variant: musl-aarch64
+            runner: ubuntu-24.04-arm
+            containerfile: Containerfile.musl-aarch64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Podman Container Image
+        run: |
+          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/picoforge-appimage-builder:${{ matrix.variant }}"
+          podman build -t "$IMAGE_TAG" -f .github/containers/${{ matrix.containerfile }} .
+
+      - name: Push Container Image to GHCR
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: picoforge-appimage-builder
+          tags: ${{ matrix.variant }}
+          registry: ghcr.io/${{ github.repository_owner }}
