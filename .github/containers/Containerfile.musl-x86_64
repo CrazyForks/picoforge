@@ -1,0 +1,36 @@
+FROM alpine:latest
+
+# Install build dependencies, linux-headers, and libraries
+RUN apk add --no-cache \
+        build-base \
+        linux-headers \
+        pkgconf \
+        curl \
+        git \
+        file \
+        wget \
+        patchelf \
+        bash \
+        gcompat \
+        desktop-file-utils \
+        fontconfig-dev \
+        freetype-dev \
+        libxcb-dev \
+        libxkbcommon-dev \
+        pcsc-lite-dev \
+        eudev-dev \
+        vulkan-headers \
+        rust \
+        cargo
+
+# Install pre-extracted linuxdeploy (runs via gcompat)
+RUN wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /tmp/linuxdeploy.AppImage && \
+    chmod +x /tmp/linuxdeploy.AppImage && \
+    cd /tmp && /tmp/linuxdeploy.AppImage --appimage-extract && \
+    mv /tmp/squashfs-root /usr/local/share/linuxdeploy && \
+    ln -s /usr/local/share/linuxdeploy/AppRun /usr/local/bin/linuxdeploy && \
+    rm -f /usr/local/share/linuxdeploy/usr/bin/strip && \
+    ln -s /usr/bin/strip /usr/local/share/linuxdeploy/usr/bin/strip && \
+    rm /tmp/linuxdeploy.AppImage
+
+WORKDIR /workspace

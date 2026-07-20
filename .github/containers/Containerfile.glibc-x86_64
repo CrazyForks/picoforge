@@ -1,0 +1,46 @@
+FROM rockylinux:8
+
+# Install EPEL, enable powertools, and install build dependencies
+RUN dnf install -y epel-release dnf-plugins-core && \
+    dnf config-manager --set-enabled powertools && \
+    dnf install -y \
+        gcc-toolset-15-gcc \
+        gcc-toolset-15-gcc-c++ \
+        gcc-toolset-15-binutils \
+        make \
+        pkgconf-pkg-config \
+        curl \
+        git \
+        file \
+        wget \
+        patchelf \
+        desktop-file-utils \
+        fontconfig-devel \
+        freetype-devel \
+        libxcb-devel \
+        libxkbcommon-devel \
+        libxkbcommon-x11-devel \
+        pcsc-lite-devel \
+        systemd-devel \
+        vulkan-headers \
+        libX11-devel && \
+    dnf clean all
+
+# Environment setup for GCC Toolset 15 and Rust
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:/opt/rh/gcc-toolset-15/root/usr/bin:$PATH
+
+# Install Rust stable toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && \
+    rustc --version && cargo --version
+
+# Install pre-extracted linuxdeploy
+RUN wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /tmp/linuxdeploy.AppImage && \
+    chmod +x /tmp/linuxdeploy.AppImage && \
+    cd /tmp && /tmp/linuxdeploy.AppImage --appimage-extract && \
+    mv /tmp/squashfs-root /usr/local/share/linuxdeploy && \
+    ln -s /usr/local/share/linuxdeploy/AppRun /usr/local/bin/linuxdeploy && \
+    rm /tmp/linuxdeploy.AppImage
+
+WORKDIR /workspace

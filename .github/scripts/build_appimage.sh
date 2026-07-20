@@ -1,27 +1,54 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
-VERSION=${version:-"0.0.0"}
+VARIANT=${1:-"glibc-x86_64"}
 
-ARCH=$(uname -m)
-if [ "$ARCH" == "x86_64" ]; then
-    LINUXDEPLOY_ARCH="x86_64"
-    APPIMAGE_ARCH="x86-64"
-elif [ "$ARCH" == "aarch64" ]; then
-    LINUXDEPLOY_ARCH="aarch64"
-    APPIMAGE_ARCH="arm64"
+echo "=== Building PicoForge AppImage for variant: ${VARIANT} ==="
+
+# Locate PicoForge source directory
+if [ -f "/workspace/Cargo.toml" ]; then
+    SRC_DIR="/workspace"
+elif [ -f "/workspace/picoforge/Cargo.toml" ]; then
+    SRC_DIR="/workspace/picoforge"
 else
-    echo "Unsupported architecture: $ARCH"
+    echo "Error: Cargo.toml not found in /workspace or /workspace/picoforge"
     exit 1
 fi
 
-echo "Building AppImage for architecture: $ARCH"
+cd "$SRC_DIR"
 
-echo "Downloading linuxdeploy..."
-wget "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${LINUXDEPLOY_ARCH}.AppImage"
-chmod +x linuxdeploy-${LINUXDEPLOY_ARCH}.AppImage
+# Extract version from Cargo.toml
+VERSION=$(grep -m 1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
+if [ -z "$VERSION" ]; then
+    VERSION="0.0.0"
+fi
+echo "PicoForge Version: ${VERSION}"
 
-export APPIMAGE_EXTRACT_AND_RUN=1
+# Determine architecture and target naming
+ARCH=$(uname -m)
+if [ "$ARCH" == "x86_64" ]; then
+    ARCH_NAME="x86-64"
+elif [ "$ARCH" == "aarch64" ]; then
+    ARCH_NAME="aarch64"
+else
+    ARCH_NAME="$ARCH"
+fi
+
+# Define output filename based on variant
+case "$VARIANT" in
+    glibc-2.28-x86_64|glibc-2.28-aarch64)
+        OUTPUT_NAME="picoforge_${VERSION}_glibc-2.28_${ARCH_NAME}.AppImage"
+        ;;
+    musl-x86_64|musl-aarch64)
+        OUTPUT_NAME="picoforge_${VERSION}_musl_${ARCH_NAME}.AppImage"
+        ;;
+    *)
+        OUTPUT_NAME="picoforge_${VERSION}_${VARIANT}_${ARCH_NAME}.AppImage"
+        ;;
+esac
+
+echo "Building release binary with Cargo..."
+cargo build --release
 
 BINARY_PATH="target/release/picoforge"
 DESKTOP_FILE="data/in.suyogtandel.picoforge.desktop"
@@ -42,8 +69,12 @@ if [ ! -f "$ICON_FILE" ]; then
     exit 1
 fi
 
-echo "Running linuxdeploy..."
-./linuxdeploy-${LINUXDEPLOY_ARCH}.AppImage \
+echo "Packaging AppImage using linuxdeploy..."
+export APPIMAGE_EXTRACT_AND_RUN=1
+
+# Run linuxdeploy to bundle executable, desktop entry, icon, excluding host daemon libpcsclite
+rm -rf AppDir
+linuxdeploy \
     --appdir AppDir \
     --executable "$BINARY_PATH" \
     --desktop-file "$DESKTOP_FILE" \
@@ -51,10 +82,17 @@ echo "Running linuxdeploy..."
     --exclude-library libpcsclite.so.1 \
     --output appimage
 
-rm "linuxdeploy-${LINUXDEPLOY_ARCH}.AppImage"
+# Find generated AppImage file and rename to standard naming
+GENERATED_APPIMAGE=$(ls -t *.AppImage 2>/dev/null | head -n 1)
 
-mkdir -p target/release
-mv *.AppImage "target/release/picoforge_${VERSION}_${APPIMAGE_ARCH}.AppImage"
+if [ -z "$GENERATED_APPIMAGE" ]; then
+    echo "Error: AppImage generation failed"
+    exit 1
+fi
 
-echo "AppImage build complete. Artifacts moved to target/release/"
-ls -l target/release/*.AppImage
+mkdir -p /workspace/target/release
+mv "$GENERATED_APPIMAGE" "/workspace/target/release/${OUTPUT_NAME}"
+rm -rf AppDir
+
+echo "=== Build Complete! Output: /workspace/target/release/${OUTPUT_NAME} ==="
+ls -lh "/workspace/target/release/${OUTPUT_NAME}"
