@@ -114,12 +114,14 @@ package_appimage() {
     export LDAI_OUTPUT="${output_name}"
 
     rm -rf AppDir
+    mkdir -p AppDir/usr/share/metainfo
+    cp "${metainfo}" "AppDir/usr/share/metainfo/$(basename "${metainfo}")"
+
     linuxdeploy \
         --appdir AppDir \
         --executable "${binary}" \
         --desktop-file "${desktop}" \
         --icon-file "${icon}" \
-        --appdata-file "${metainfo}" \
         --exclude-library libpcsclite.so.1 \
         --output appimage
 }
