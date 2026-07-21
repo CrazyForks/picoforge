@@ -86,6 +86,3 @@ generate_desktop_entry = false
 excluded_libraries = ["libpcsclite*.so*"]
 files = { "data/in.suyogtandel.picoforge.desktop" = "usr/share/applications/in.suyogtandel.picoforge.desktop", "static/appIcons/in.suyogtandel.picoforge-symbolic.svg" = "usr/share/icons/hicolor/symbolic/apps/in.suyogtandel.picoforge-symbolic.svg", "static/appIcons/in.suyogtandel.picoforge.svg" = "usr/share/icons/hicolor/scalable/apps/in.suyogtandel.picoforge.svg" }
 
-# NOTE: The paths for .deb packages needs to be verified not sure about these.
-[package.metadata.packager.deb]
-files = { "data/in.suyogtandel.picoforge.desktop" = "usr/share/applications/in.suyogtandel.picoforge.desktop", "static/appIcons/in.suyogtandel.picoforge-symbolic.svg" = "usr/share/icons/hicolor/symbolic/apps/in.suyogtandel.picoforge-symbolic.svg", "static/appIcons/in.suyogtandel.picoforge.svg" = "usr/share/icons/hicolor/scalable/apps/in.suyogtandel.picoforge.svg" }

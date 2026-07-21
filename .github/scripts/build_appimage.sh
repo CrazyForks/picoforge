@@ -75,6 +75,7 @@ verify_assets() {
     local binary="$1"
     local desktop="$2"
     local icon="$3"
+    local metainfo="$4"
 
     if [ ! -f "${binary}" ]; then
         echo "Error: Binary not found at ${binary}"
@@ -88,6 +89,10 @@ verify_assets() {
         echo "Error: Icon file not found at ${icon}"
         exit 1
     fi
+    if [ ! -f "${metainfo}" ]; then
+        echo "Error: Metainfo file not found at ${metainfo}"
+        exit 1
+    fi
 }
 
 package_appimage() {
@@ -95,6 +100,7 @@ package_appimage() {
     local binary="$2"
     local desktop="$3"
     local icon="$4"
+    local metainfo="$5"
 
     echo "Packaging AppImage using linuxdeploy..."
     export APPIMAGE_EXTRACT_AND_RUN=1
@@ -113,6 +119,7 @@ package_appimage() {
         --executable "${binary}" \
         --desktop-file "${desktop}" \
         --icon-file "${icon}" \
+        --appdata-file "${metainfo}" \
         --exclude-library libpcsclite.so.1 \
         --output appimage
 }
@@ -178,9 +185,10 @@ main() {
     local binary="target/release/picoforge"
     local desktop="data/in.suyogtandel.picoforge.desktop"
     local icon="static/appIcons/in.suyogtandel.picoforge.svg"
+    local metainfo="data/in.suyogtandel.picoforge.metainfo.xml"
 
-    verify_assets "${binary}" "${desktop}" "${icon}"
-    package_appimage "${output_name}" "${binary}" "${desktop}" "${icon}"
+    verify_assets "${binary}" "${desktop}" "${icon}" "${metainfo}"
+    package_appimage "${output_name}" "${binary}" "${desktop}" "${icon}" "${metainfo}"
     move_artifacts "${output_name}"
     cleanup
     print_summary "${output_name}"
